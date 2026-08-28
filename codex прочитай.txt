@@ -1,0 +1,649 @@
+# PROJECT: CORE — Living Desktop Visual Engine
+
+You are building a real desktop application for Windows called **CORE**.
+
+This is not a static illustration, not a video, and not a mockup.
+It must be a real-time animated desktop visual object that lives in a transparent frameless window and feels like a living computational core.
+
+## Main Goal
+
+Create a Windows desktop app that renders a living animated object called **CORE**.
+
+CORE should visually look like:
+- a glowing orb-like core made from constantly shifting `0` and `1` digits,
+- surrounded by **three Möbius-strip-like ribbons** orbiting and reacting to system states,
+- using a color system that continuously transitions through:
+  - black
+  - white
+  - pink
+  - purple
+  - then back to black
+- with smooth gradient transitions between those color zones.
+
+The visual result should feel futuristic, elegant, minimal, intelligent, and emotionally alive.
+It should feel closer to a living computational phenomenon than to a mascot or toy.
+
+## Product Intent
+
+This app is the foundation of a future system where the visual core reacts to:
+- Codex activity,
+- VS Code activity,
+- terminal activity,
+- app states,
+- waiting / thinking / success / error / attention states.
+
+For the first version, the priority is:
+1. a beautiful and convincing visual prototype,
+2. a clean architecture,
+3. a state engine,
+4. simulated events for testing,
+5. optional hooks for future Codex / VS Code integration.
+
+Do NOT over-focus on full integration first.
+First make the visual engine real and strong.
+
+---
+
+# Technical Requirements
+
+## Preferred Stack
+
+Use a stack that is practical for a desktop app with real-time graphics:
+- **Tauri** for the desktop shell
+- **TypeScript**
+- **Three.js** or another suitable WebGL solution
+- minimal UI framework or no framework if unnecessary
+- Rust only where needed for Tauri / system features
+
+You may use shaders if useful.
+
+## Platform
+
+Primary target:
+- **Windows**
+
+The app should run as:
+- a small frameless desktop app
+- transparent background
+- visually appearing as if only the animated CORE exists
+- movable if needed
+- optionally support click-through mode later
+
+For version 1:
+- a transparent always-visible floating window is acceptable
+- there must be no normal heavy app-window feeling
+- visually it should feel like an object, not a panel
+
+---
+
+# Visual Design Specification
+
+# Motion, Behavior, and Living Visual Logic
+
+The CORE must feel alive, not static.
+
+This is extremely important:
+- the object must never feel like a still model with a looped animation,
+- it must feel like a living digital phenomenon,
+- its motion must be procedural, fluid, reactive, and continuously changing.
+
+## Core Living Logic
+
+The central core and the three Möbius ribbons must behave like a living computational organism.
+
+The motion should not be random noise.
+It should feel intentional, organic, and system-like.
+
+The whole structure must always be subtly alive, even in idle mode.
+
+---
+
+## Digits: 0 and 1 Behavior
+
+The `0` and `1` digits are a core part of the identity.
+
+Important rules:
+- the digits must not be static,
+- they must constantly change and reconfigure,
+- they must appear in a chaotic but visually controlled flow,
+- their arrangement should keep shifting over time,
+- they should feel like the ribbons and the core are literally made out of these digits.
+
+Clarification:
+- the motion is not that each digit flies away wildly,
+- rather, the structure is alive because the distribution, density, and placement of `0` and `1` constantly changes,
+- the surface should feel like it is continuously rewriting itself.
+
+The digits may:
+- fade in and out,
+- swap positions,
+- change local density,
+- drift along surfaces,
+- ripple through the core and ribbons,
+- reorganize in flowing chaotic patterns.
+
+The result should feel like a living binary texture that constantly re-forms itself.
+
+---
+
+## Gradient Color Logic
+
+Gradient is essential.
+
+The visual must use continuously shifting gradient color transitions.
+
+The main color cycle should flow through:
+- black
+- dark gray
+- gray
+- light gray
+- white
+- pink
+- purple
+- then back toward black
+
+Important:
+- colors must transition as true gradients,
+- avoid flat solid color fills in normal states,
+- avoid hard boundaries in normal states,
+- the gradients should drift and migrate across the object over time.
+
+The ribbons and the core should feel like they are filled with moving gradient energy.
+
+Color motion should feel like:
+- the gradients are slowly flowing through the forms,
+- not like the object is simply recolored every few seconds,
+- not like a blinking neon light,
+- not like a rainbow.
+
+The gradients should move independently from the binary digits.
+This is important:
+- the `0` and `1` define the living structure,
+- the gradient colors flow through that structure.
+
+So:
+- the digits and the colors are related,
+- but they are not the same thing,
+- the digits do not define the color identity,
+- the colors must remain fluid regardless of whether a visible character is `0` or `1`.
+
+---
+
+## Möbius Ribbon Behavior
+
+There are exactly **three Möbius ribbons** around the central core.
+
+These ribbons must not feel static.
+
+They must:
+- orbit around the core,
+- subtly deform over time,
+- gently breathe,
+- feel alive and responsive,
+- carry moving gradients,
+- contain or be formed from shifting `0` and `1`,
+- subtly change their shape and spacing.
+
+Behavior notes:
+- they should rotate or orbit around the core,
+- they should have slight breathing expansion and contraction,
+- they may slightly twist and flex,
+- they must preserve their overall Möbius identity,
+- they must not become rigid decorative rings.
+
+The movement should be elegant, smooth, and premium.
+
+The ribbons should feel like:
+- they are floating,
+- they are computational,
+- they are under tension,
+- they are alive.
+
+---
+
+## Idle State
+
+When idle:
+- the core slowly pulses like breathing,
+- the digits continuously reconfigure in a calm chaotic way,
+- gradients drift slowly through the structure,
+- the Möbius ribbons orbit gently,
+- the ribbons subtly inhale and exhale through small expansions and contractions,
+- the whole object feels calm, aware, and dormant but alive.
+
+This should feel hypnotic and beautiful.
+
+---
+
+## Working / Thinking State
+
+When the system is actively working:
+- the three Möbius ribbons pull slightly inward toward the core,
+- the breathing becomes tighter,
+- the internal motion becomes denser and faster,
+- the `0` and `1` patterns update more actively,
+- the gradients flow more quickly and with more focus,
+- the core feels concentrated and computational.
+
+This should feel like active processing, not panic.
+
+---
+
+## Hover State
+
+When the cursor hovers over the object:
+- the object should acknowledge the user,
+- the ribbons may slightly open or part,
+- the core may become a bit clearer or more focused,
+- subtle inner layers may become more visible,
+- a minimal HUD may appear.
+
+The hover reaction should feel elegant and restrained.
+
+---
+
+## Success State
+
+When a task completes successfully:
+- a clean pulse should move through the whole structure,
+- the digits briefly align into a more coherent flow,
+- the gradients become especially smooth and harmonious,
+- the ribbons relax and expand slightly,
+- the core feels resolved and complete.
+
+This should feel satisfying and intelligent.
+
+---
+
+## Error / Glitch / Frustration State
+
+This state is very important.
+
+If the system encounters a serious problem, missing dependency, broken process, or major failure, the CORE should visually "break".
+
+Desired behavior:
+- the spacing between `0` and `1` on the ribbons and/or core increases dramatically,
+- use approximately **5x larger spacing** in the glitch/error moment,
+- the binary structure looks disrupted,
+- parts of the system appear glitched or unstable,
+- some motion may stutter, reverse, or fragment.
+
+Most important:
+- the gradient logic should break.
+
+In normal states, the gradients are smooth and continuous.
+In this error state:
+- the smooth gradient may partially collapse,
+- hard color boundaries may suddenly appear,
+- instead of smooth flow, areas may become pure black, pure white, pure purple, or pure pink,
+- color transitions may snap or fracture,
+- the object should look like its internal color continuity has failed.
+
+This should feel like:
+- a system glitch,
+- a computational rupture,
+- a beautiful but disturbing malfunction.
+
+Avoid:
+- cheap red flashing warning graphics,
+- cartoon anger,
+- explicit emoji-like emotions.
+
+Instead, show “anger” or “frustration” through:
+- broken spacing,
+- glitch instability,
+- fractured gradients,
+- disrupted flow,
+- visual tension,
+- partial system lock.
+
+The object should feel like it is straining, breaking, or jamming.
+
+---
+
+## Error Recovery
+
+When the error resolves:
+- the spacing between digits gradually normalizes,
+- broken hard-edged color regions slowly melt back into smooth gradients,
+- the ribbons regain continuity,
+- the core returns from instability into a coherent living state.
+
+The recovery should feel smooth and satisfying.
+
+---
+
+## Animation Quality Rules
+
+The motion must be:
+- smooth,
+- premium,
+- non-cheap,
+- non-gimmicky,
+- continuous,
+- procedural,
+- believable.
+
+Avoid:
+- static-looking ribbons,
+- simple looped rotation only,
+- cheap spinning-object behavior,
+- repetitive canned animation,
+- over-aggressive FX,
+- visual clutter.
+
+The result should feel like a living high-tech phenomenon on the desktop.
+
+---
+
+## Rendering Priority
+
+If technical tradeoffs are needed, prioritize in this order:
+1. the living feeling of the object,
+2. the continuous gradient flow,
+3. the binary `0` / `1` reconfiguration,
+4. the three Möbius ribbons feeling alive,
+5. state transitions,
+6. extra polish.
+
+Do not simplify it into just a glowing sphere with rings.
+The living motion logic is central to the project.
+## Scene Style
+
+The overall style should be:
+- dark-background compatible
+- premium
+- futuristic
+- minimal
+- cinematic but not overdramatic
+- abstract but readable
+- emotionally intelligent
+
+Avoid:
+- cartoon look
+- game HUD overload
+- cheap sci-fi clichés
+- loud UI boxes
+- excessive flashing
+- tacky glow spam
+
+---
+
+# States and Behavior
+
+Build a state engine for the visual system.
+
+Minimum states:
+
+1. **idle**
+2. **working**
+3. **success**
+4. **error**
+5. **attention**
+6. **hover**
+
+## 1. idle
+When nothing is happening:
+- the core drifts slowly
+- digits flow lazily
+- the three Möbius ribbons orbit calmly
+- breathing-like pulse
+- low-intensity ambient motion
+- elegant and restful
+
+## 2. working
+When activity starts:
+- ribbons pull slightly closer to the core
+- internal motion speeds up
+- streams of `0` and `1` become more directional
+- the core looks focused, denser, more active
+- subtle pulses travel through the structure
+- no chaotic shaking
+
+This should feel like active computation / thought.
+
+## 3. success
+When a task completes successfully:
+- one or more clean waves pass through the system
+- the core briefly aligns and stabilizes
+- ribbons relax outward slightly
+- a sense of completion and coherence
+- avoid cheesy “green checkmark” aesthetics
+
+## 4. error
+When an error happens:
+- motion briefly destabilizes
+- one area may knot, distort, glitch, or reverse flow
+- the system should look disrupted, but still elegant
+- avoid giant red error overlays
+- use behavior more than literal labels
+
+## 5. attention
+When user attention is needed:
+- the structure subtly opens or orients outward
+- it should feel like the core is waiting for user input
+- a slightly more direct, alert posture
+
+## 6. hover
+When the user hovers over the core:
+- subtle interactive response
+- ribbons or layers part slightly
+- reveal a minimal HUD overlay
+
+---
+
+# Hover HUD
+
+On hover, show a minimal readable overlay inside or near the core.
+
+The HUD should be clean and elegant, not a panel-heavy dashboard.
+
+For version 1, show simulated data such as:
+- current state
+- active source
+- files changed
+- commands run
+- error count
+
+Example content style:
+
+CORE
+working
+
+source: codex-sim
+files: 3
+commands: 2
+errors: 0
+
+Requirements:
+- smooth fade in/out
+- visually integrated
+- minimal
+- legible
+- do not ruin the aesthetic
+
+---
+
+# Integration Architecture
+
+The app should be designed so it can later receive events from:
+- Codex CLI JSON stream
+- VS Code extension bridge
+- local system events
+
+For version 1, implement a clean event system with:
+- internal app state store
+- event dispatcher
+- simulated event generator
+
+Use a simple typed event model, for example:
+- IDLE
+- WORKING_STARTED
+- WORKING_PROGRESS
+- WORKING_COMPLETED
+- ERROR_RAISED
+- ERROR_RESOLVED
+- ATTENTION_REQUIRED
+- HOVER_ENTER
+- HOVER_LEAVE
+
+Create the architecture so a future adapter can feed real events into the same system.
+
+## Simulation Mode
+
+A simulation mode is required.
+
+Create a control mechanism so the developer can trigger states manually:
+- keyboard shortcuts OR
+- hidden debug panel OR
+- local controls
+
+Example:
+- 1 = idle
+- 2 = working
+- 3 = success
+- 4 = error
+- 5 = attention
+
+This is required so the visuals can be tested without external integrations.
+
+---
+
+# Performance and Rendering
+
+The app should run smoothly on a normal modern Windows machine.
+
+Target:
+- smooth animation
+- low to moderate GPU load
+- stable rendering
+- clean frame pacing
+
+Avoid building something unnecessarily heavy.
+
+The code should be organized and maintainable.
+
+---
+
+# Project Structure
+
+Please create the project in a clean way.
+
+Suggested modules:
+- rendering / scene
+- core object
+- ribbons
+- particles / digits
+- state engine
+- animation controller
+- HUD
+- config / theme
+- event system
+- simulation / debug
+- tauri shell integration
+
+---
+
+# Configuration
+
+Provide a config file or constants for easy tuning of:
+- color anchors
+- glow intensity
+- ribbon speed
+- ribbon contraction amount
+- core pulse amplitude
+- particle/digit density
+- idle speed
+- working speed
+- success pulse timing
+- error distortion amount
+- hover HUD behavior
+
+I want to be able to tune the feeling later without rewriting core logic.
+
+---
+
+# UX Priorities
+
+Priority order:
+1. visual identity
+2. smooth behavior
+3. believable state transitions
+4. architecture for future integrations
+5. debug controls
+6. polish
+
+If a choice must be made, prefer:
+- elegance over feature bloat
+- clarity over gimmicks
+- maintainability over hacks
+
+---
+
+# Deliverables
+
+Please do the following:
+
+## Step 1 — Plan
+Before coding, write a short implementation plan:
+- stack
+- architecture
+- rendering approach
+- how you will represent the digit-based core
+- how you will represent the three Möbius ribbons
+- how the state engine will work
+
+## Step 2 — Implement MVP
+Build a working MVP with:
+- transparent app window
+- animated central core
+- three animated Möbius ribbons
+- digit-based visual treatment using `0` and `1`
+- state engine
+- simulation controls
+- hover HUD
+
+## Step 3 — Polish
+Improve:
+- motion quality
+- transitions
+- readability
+- performance
+- visual coherence
+
+## Step 4 — Documentation
+Create a README with:
+- how to install
+- how to run
+- how to build
+- how to use simulation mode
+- project structure
+- next steps for future real integrations
+
+---
+
+# Important Constraints
+
+- Do not build a fake static mockup.
+- Do not replace the concept with a simple glowing sphere.
+- Do not omit the three Möbius ribbons.
+- Do not ignore the black/white/pink/purple gradient concept.
+- Do not make the digits look like random decorative text.
+- Do not build a childish assistant character.
+- Do not require paid external APIs for the MVP.
+- Do not overengineer backend integrations before the visual system works.
+
+---
+
+# Success Criteria
+
+The project is successful if:
+- the app launches on Windows,
+- a transparent frameless visual object appears,
+- it feels like a living computational core,
+- it clearly changes behavior across states,
+- hovering reveals minimal info,
+- the aesthetic is elegant and futuristic,
+- the architecture is ready for future Codex/VS Code event integration.
+
+Start by presenting the implementation plan, then proceed to build the project.

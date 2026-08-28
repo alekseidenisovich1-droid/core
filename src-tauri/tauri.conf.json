@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CORE",
+  "version": "0.1.0",
+  "identifier": "ai.core.desktop",
+  "build": {
+    "beforeDevCommand": "npm.cmd run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm.cmd run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{
+      "title": "CORE",
+      "width": 680,
+      "height": 680,
+      "minWidth": 420,
+      "minHeight": 420,
+      "transparent": true,
+      "decorations": false,
+      "alwaysOnTop": true,
+      "resizable": true,
+      "shadow": false,
+      "center": true
+    }],
+    "security": { "csp": null }
+  },
+  "bundle": { "active": true, "targets": "all" }
+}

@@ -1,0 +1,11 @@
+#drag-handle {
+  position: absolute;
+  z-index: 10;
+  left: 25%;
+  right: 25%;
+  top: 0;
+  height: 26px;
+  cursor: grab;
+}
+#drag-handle:active { cursor: grabbing; }
+#scene { cursor: default; }

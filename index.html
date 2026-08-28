@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CORE</title>
+  </head>
+  <body>
+    <main id="app" aria-label="CORE living visual">
+      <div id="drag-handle" data-tauri-drag-region aria-hidden="true"></div>
+      <div id="scene"></div>
+      <section id="hud" data-tauri-drag-region aria-live="polite">
+        <div class="hud-kicker">CORE <i></i></div>
+        <div id="hud-state">idle</div>
+        <dl>
+          <div><dt>source</dt><dd id="hud-source">local-sim</dd></div>
+          <div><dt>files</dt><dd id="hud-files">0</dd></div>
+          <div><dt>commands</dt><dd id="hud-commands">0</dd></div>
+          <div><dt>errors</dt><dd id="hud-errors">0</dd></div>
+        </dl>
+      </section>
+      <div id="hint">3 ERROR · 4 CRITICAL · 5 CRITICAL 2 · ←/→ effects · A live</div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
