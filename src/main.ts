@@ -198,6 +198,7 @@ type CoreWindow=Window&{
     setLayer:(entity:VisualEntityKey,enabled:boolean)=>void;
     setTransitionSpeed:(value:number)=>void;
     getPhase:()=>string;
+    getTerrainPhase:()=>string;
     setTerrainParameter:(key:TerrainParameterKey,value:number)=>void;
     getTerrainParameters:()=>Readonly<Record<TerrainParameterKey,number>>;
   };
@@ -207,6 +208,7 @@ coreWindow.__coreVisualDebug={
   setLayer:(entity,enabled)=>visual.setVisualEntityDebug(entity,enabled),
   setTransitionSpeed:value=>visual.setCubeTransitionTimeScale(value),
   getPhase:()=>visual.getCubeTransitionPhase(),
+  getTerrainPhase:()=>visual.getTerrainTransitionPhase(),
   setTerrainParameter:(key,value)=>visual.setTerrainParameter(key,value),
   getTerrainParameters:()=>visual.getTerrainParameters(),
 };

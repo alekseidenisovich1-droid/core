@@ -65,11 +65,17 @@ export const CONFIG = {
     cubeTransitionTimeScale: 1,
     cubeFragmentPeriod: 18,
     cubeFragmentDuration: 1.7,
-    terrainColumns: 128,
-    terrainRows: 76,
-    terrainWidth: 7.4,
-    terrainDepth: 5.2,
-    terrainTransitionSeconds: 2.2,
+    // The simulation domain deliberately extends well beyond the visible
+    // field. 43k GPU points replace roughly 39k vertices from the old glyph
+    // quads, so the denser point topology stays within the same order of cost.
+    terrainColumns: 240,
+    terrainRows: 180,
+    terrainWidth: 14,
+    terrainDepth: 12,
+    terrainTransitionSeconds: 3.1,
+    terrainCoreGatherSeconds: 1.2,
+    terrainSourceHoldSeconds: .5,
+    terrainTargetReleaseSeconds: 1.2,
   },
 } as const;
 

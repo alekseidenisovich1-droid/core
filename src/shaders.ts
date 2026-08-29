@@ -443,15 +443,16 @@ export const cubeGlyphFragmentShader=/* glsl */`
 
 export const terrainVertexShader=/* glsl */`
   attribute vec2 aGrid;
-  attribute float aSeed,aBit;
-  uniform float uTime,uPresence,uTopologyProgress,uAmplitude,uMacroFrequency,uMacroSpeed;
+  attribute float aSeed,aFormationDelay;
+  uniform float uTime,uPresence,uTopologyProgress,uPixelRatio,uAmplitude,uMacroFrequency,uMacroSpeed;
   uniform float uMediumStrength,uMediumFrequency,uWaveDirectionCount;
   uniform float uLocalEventFrequency,uLocalEventRadius,uLocalEventStrength,uLocalEventLifetime;
-  uniform float uSimulationDamping,uPropagationStrength,uMicroDisplacement,uBinaryFlipRate,uActivityFlipCoupling;
-  uniform float uEdgeFadeStart,uEdgeFadeWidth,uBinaryDensity,uEmission;
+  uniform float uSimulationDamping,uPropagationStrength,uMicroDisplacement;
+  uniform float uEdgeFadeStart,uEdgeFadeWidth,uPointDensity,uEmission;
   uniform float uWarmWhiteIntensity,uAmberThreshold,uRedThreshold,uAoStrength,uFogAttenuation;
-  varying vec2 vGlyphUv;
-  varying float vBit,vAlpha,vBrightness,vActivity,vViewDepth;
+  uniform vec2 uTerrainHalfSize;
+  uniform vec3 uSourcePosition;
+  varying float vAlpha,vBrightness,vActivity,vViewDepth;
   varying vec3 vColor;
 
   float hash11(float p){return fract(sin(p*127.1)*43758.5453123);}
@@ -481,34 +482,54 @@ export const terrainVertexShader=/* glsl */`
   }
   float heightField(vec2 p,float clock){
     float slow=clock*uMacroSpeed;
+    float activeClock=clock*1.72;
     float macroRaw=fbm(vec3(p*uMacroFrequency,slow))-.51;
     float macro=sign(macroRaw)*pow(abs(macroRaw)*1.82,1.28);
     float warp=(noise3(vec3(p*.31,slow*.73))-.5)*2.7;
     float medium=0.;
-    medium+=sin(dot(p,normalize(vec2(.83,.47)))*uMediumFrequency+warp+clock*.137);
-    medium+=sin(dot(p,normalize(vec2(-.38,.92)))*uMediumFrequency*1.19-warp*.61-clock*.109)
+    medium+=sin(dot(p,normalize(vec2(.83,.47)))*uMediumFrequency+warp+activeClock*.137);
+    medium+=sin(dot(p,normalize(vec2(-.38,.92)))*uMediumFrequency*1.19-warp*.61-activeClock*.109)
       *step(1.5,uWaveDirectionCount);
-    medium+=sin(dot(p,normalize(vec2(.24,-.97)))*uMediumFrequency*.77+warp*1.17+clock*.083)
+    medium+=sin(dot(p,normalize(vec2(.24,-.97)))*uMediumFrequency*.77+warp*1.17+activeClock*.083)
       *step(2.5,uWaveDirectionCount);
-    medium+=sin(dot(p,normalize(vec2(-.91,-.42)))*uMediumFrequency*1.43-warp*.83+clock*.061)
+    medium+=sin(dot(p,normalize(vec2(-.91,-.42)))*uMediumFrequency*1.43-warp*.83+activeClock*.061)
       *step(3.5,uWaveDirectionCount);
-    medium+=sin(dot(p,normalize(vec2(.64,-.77)))*uMediumFrequency*1.71+warp*.47-clock*.047)
+    medium+=sin(dot(p,normalize(vec2(.64,-.77)))*uMediumFrequency*1.71+warp*.47-activeClock*.047)
       *step(4.5,uWaveDirectionCount);
-    medium*=uMediumStrength/max(1.,uWaveDirectionCount);
+    medium+=sin(dot(p,normalize(vec2(-.72,.69)))*uMediumFrequency*.91-warp*.32+activeClock*.119)
+      *step(5.5,uWaveDirectionCount);
+    medium+=sin(dot(p,normalize(vec2(.97,.22)))*uMediumFrequency*1.31+warp*.78-activeClock*.073)
+      *step(6.5,uWaveDirectionCount);
+    medium+=sin(dot(p,normalize(vec2(-.12,-.99)))*uMediumFrequency*1.58-warp*1.04-activeClock*.091)
+      *step(7.5,uWaveDirectionCount);
+    medium+=sin(dot(p,normalize(vec2(.51,.86)))*uMediumFrequency*.66+warp*.55+activeClock*.157)
+      *step(8.5,uWaveDirectionCount);
+    medium+=sin(dot(p,normalize(vec2(-.95,.31)))*uMediumFrequency*1.84-warp*.69+activeClock*.052)
+      *step(9.5,uWaveDirectionCount);
+    medium*=uMediumStrength/sqrt(max(1.,uWaveDirectionCount));
 
-    float eventClock=clock/max(uLocalEventLifetime,.5)*uLocalEventFrequency;
-    vec2 c0=vec2(sin(eventClock*.47+1.3)*2.15,cos(eventClock*.31+.2)*1.38);
-    vec2 c1=vec2(cos(eventClock*.29+2.1)*2.42,sin(eventClock*.53+1.7)*1.55);
-    vec2 c2=vec2(sin(eventClock*.37+4.2)*1.86,cos(eventClock*.43+3.1)*1.72);
+    float eventClock=activeClock/max(uLocalEventLifetime,.5)*uLocalEventFrequency;
+    vec2 c0=vec2(sin(eventClock*.47+1.3)*3.15,cos(eventClock*.31+.2)*2.18);
+    vec2 c1=vec2(cos(eventClock*.29+2.1)*3.42,sin(eventClock*.53+1.7)*2.35);
+    vec2 c2=vec2(sin(eventClock*.37+4.2)*2.86,cos(eventClock*.43+3.1)*2.52);
+    vec2 c3=vec2(cos(eventClock*.41+.7)*3.7,sin(eventClock*.27+5.4)*1.92);
+    vec2 c4=vec2(sin(eventClock*.33+3.8)*2.48,cos(eventClock*.59+2.6)*2.75);
+    vec2 c5=vec2(cos(eventClock*.23+5.1)*3.22,sin(eventClock*.49+.9)*2.16);
     float life0=smoothstep(-.72,-.08,sin(eventClock*.71+.4))*(1.-smoothstep(.38,.93,sin(eventClock*.71+.4)));
     float life1=smoothstep(-.8,-.18,sin(eventClock*.57+2.3))*(1.-smoothstep(.34,.91,sin(eventClock*.57+2.3)));
     float life2=smoothstep(-.76,-.12,sin(eventClock*.83+4.7))*(1.-smoothstep(.4,.94,sin(eventClock*.83+4.7)));
+    float life3=smoothstep(-.78,-.16,sin(eventClock*.63+1.8))*(1.-smoothstep(.36,.92,sin(eventClock*.63+1.8)));
+    float life4=smoothstep(-.74,-.1,sin(eventClock*.77+3.4))*(1.-smoothstep(.42,.95,sin(eventClock*.77+3.4)));
+    float life5=smoothstep(-.81,-.2,sin(eventClock*.51+5.9))*(1.-smoothstep(.32,.9,sin(eventClock*.51+5.9)));
     float events=pressureEvent(p,c0,uLocalEventRadius,uLocalEventStrength*life0,eventClock,.7);
     events-=pressureEvent(p,c1,uLocalEventRadius*1.22,uLocalEventStrength*.82*life1,eventClock+3.1,-.48);
     events+=pressureEvent(p,c2,uLocalEventRadius*.76,uLocalEventStrength*.68*life2,eventClock+7.3,.35);
-    float micro=(noise3(vec3(p*2.7,clock*.12))-.5)*uMicroDisplacement;
+    events-=pressureEvent(p,c3,uLocalEventRadius*1.38,uLocalEventStrength*.62*life3,eventClock+1.7,-.62);
+    events+=pressureEvent(p,c4,uLocalEventRadius*.9,uLocalEventStrength*.74*life4,eventClock+5.2,.44);
+    events-=pressureEvent(p,c5,uLocalEventRadius*1.08,uLocalEventStrength*.57*life5,eventClock+9.1,.28);
+    float micro=(noise3(vec3(p*2.7,activeClock*.12))-.5)*uMicroDisplacement;
     events*=mix(.72,1.08,uSimulationDamping);
-    return (macro+medium+events+micro)*uAmplitude;
+    return (macro*.72+medium+events+micro)*uAmplitude;
   }
   void main(){
     float h=heightField(aGrid,uTime);
@@ -517,72 +538,79 @@ export const terrainVertexShader=/* glsl */`
     float hz=heightField(aGrid+vec2(0,eps),uTime);
     vec3 tangentX=normalize(vec3(eps,hx-h,0));
     vec3 tangentZ=normalize(vec3(0,hz-h,eps));
-    vec3 terrainNormal=normalize(cross(tangentZ,tangentX));
     float temporal=abs(heightField(aGrid,uTime+.075)-heightField(aGrid,uTime-.075));
     float activity=clamp(temporal*9.+length(vec2(hx-h,hz-h))*3.2,0.,1.);
 
-    float edgeDistance=max(abs(aGrid.x)/3.7,abs(aGrid.y)/2.6);
-    float irregularEdge=(noise3(vec3(aGrid*.43,aSeed*3.7))-.5)*.14;
-    float edge=1.-smoothstep(uEdgeFadeStart,uEdgeFadeStart+uEdgeFadeWidth,edgeDistance+irregularEdge);
-    float densityMask=step(hash11(aSeed*311.7),uBinaryDensity*mix(.42,1.,edge));
-    float flipLife=mix(3.,.4,hash11(aSeed*73.1))*max(.2,1./max(uBinaryFlipRate,.05));
-    float flipClock=(uTime+aSeed*17.3)*(1.+activity*uActivityFlipCoupling);
-    float epoch=floor(flipClock/flipLife);
-    vBit=mix(aBit,step(.5,hash11(aSeed*419.+epoch*13.7)),step(.001,uBinaryFlipRate));
+    vec2 domainPosition=abs(aGrid)/uTerrainHalfSize;
+    float edgeCoordinate=max(domainPosition.x,domainPosition.y);
+    float broadEdgeNoise=(fbm(vec3(aGrid*.18,aSeed*.73))-.5)*.2;
+    float fineEdgeNoise=sin(aGrid.x*.71+aGrid.y*.43+aSeed*18.7)*.028;
+    float distortedEdge=edgeCoordinate+broadEdgeNoise+fineEdgeNoise;
+    float edge=1.-smoothstep(uEdgeFadeStart,uEdgeFadeStart+uEdgeFadeWidth,distortedEdge);
+    edge*=1.-smoothstep(.94,.995,edgeCoordinate);
+    float densityProbability=uPointDensity*pow(max(edge,0.),.58);
+    float densityMask=step(hash11(aSeed*311.7),densityProbability);
 
-    float spatialPhase=(noise3(vec3(aGrid*.37,aSeed*2.1))-.5)*.11;
-    float fieldSpread=smoothstep(.08,.6,uTopologyProgress+spatialPhase);
-    float terrainEruption=smoothstep(.36,.86,uTopologyProgress+spatialPhase);
-    // The transitional plane is never held: as the final old matter reaches
-    // Y=0, positive and negative samples already acquire their full H(x,z,t).
-    vec3 base=vec3(aGrid.x*fieldSpread,h*terrainEruption,aGrid.y*fieldSpread);
-    float glyphScale=mix(.76,1.08,hash11(aSeed*91.3));
-    vec3 p=base+tangentX*position.x*.050*glyphScale+tangentZ*position.y*.071*glyphScale
-      +terrainNormal*.008;
+    float localProgress=smoothstep(aFormationDelay,aFormationDelay+.15,uTopologyProgress);
+    float eased=localProgress*localProgress*(3.-2.*localProgress);
+    float frontDistance=(uTopologyProgress-aFormationDelay)*13.;
+    float birthFront=exp(-frontDistance*frontDistance);
+    float frontPolarity=mix(-1.,1.,step(.5,noise3(vec3(aGrid*.24,aSeed*4.1))));
+    float shockHeight=birthFront*(.62+.5*hash11(aSeed*53.9))*frontPolarity*uAmplitude;
+    vec2 sampleJitter=vec2(hash11(aSeed*29.7)-.5,hash11(aSeed*41.3)-.5)*.044;
+    vec3 target=vec3(aGrid.x+sampleJitter.x,h+shockHeight,aGrid.y+sampleJitter.y);
+    vec3 source=uSourcePosition+vec3(
+      hash11(aSeed*71.3)-.5,hash11(aSeed*127.1)-.5,hash11(aSeed*193.7)-.5
+    )*.045;
+    vec2 curvedPath=vec2(
+      noise3(vec3(aGrid*.21,aSeed*3.7))-.5,
+      noise3(vec3(aGrid.yx*.19,aSeed*5.3))-.5
+    )*sin(eased*3.14159265)*(.28+length(aGrid/uTerrainHalfSize)*.34);
+    vec3 p=mix(source,target,eased);
+    p.xz+=curvedPath;
+    p.y+=sin(eased*3.14159265)*(hash11(aSeed*83.1)-.35)*.18;
     vec4 mv=modelViewMatrix*vec4(p,1.);
     gl_Position=projectionMatrix*mv;
-    vGlyphUv=uv;vActivity=activity;vViewDepth=-mv.z;
+    vActivity=activity;vViewDepth=-mv.z;
 
     float heightLight=smoothstep(-.34,.62,h);
-    float information=pow(hash11(aSeed*173.9),3.8)*(.42+.58*heightLight);
+    float information=pow(hash11(aSeed*173.9),3.35)*(.42+.58*heightLight);
     float warmSignal=smoothstep(uAmberThreshold,1.,activity*1.08+heightLight*.18);
-    float redSignal=smoothstep(uRedThreshold,1.,activity)*step(.975,hash11(aSeed*997.));
+    float redSignal=smoothstep(uRedThreshold,1.,activity)*step(.985,hash11(aSeed*997.));
     vec3 graphite=mix(vec3(.055,.058,.056),vec3(.32,.325,.30),information);
     vec3 ivory=vec3(.88,.845,.75)*uWarmWhiteIntensity;
     vec3 amber=vec3(.72,.43,.16);
     vec3 vermilion=vec3(.72,.14,.075);
     vec3 color=mix(graphite,ivory,information*(.22+.34*heightLight));
-    color=mix(color,amber,warmSignal*.74);color=mix(color,vermilion,redSignal);
+    color=mix(color,amber,warmSignal*.58);color=mix(color,vermilion,redSignal);
     float valleyAo=mix(1.,.52,(1.-smoothstep(-.62,.05,h))*uAoStrength);
     vColor=color*valleyAo*uEmission;
     vBrightness=clamp(information*.48+warmSignal*.68+redSignal,0.,1.);
-    float distanceFade=exp(-max(0.,vViewDepth-7.)*uFogAttenuation);
-    vAlpha=uPresence*edge*densityMask*distanceFade;
+    float distanceFade=exp(-max(0.,vViewDepth-5.2)*uFogAttenuation);
+    float farDensity=mix(1.,.38,smoothstep(5.8,11.5,vViewDepth));
+    float formed=smoothstep(.015,.16,localProgress);
+    vAlpha=uPresence*edge*densityMask*distanceFade*farDensity*formed;
+    float perspectiveSize=3.1*uPixelRatio*(3.9/max(2.2,vViewDepth));
+    float edgeSize=mix(.28,1.,smoothstep(0.,.72,edge));
+    float distanceSize=mix(1.,.62,smoothstep(5.5,11.5,vViewDepth));
+    gl_PointSize=clamp(perspectiveSize*edgeSize*distanceSize,.55*uPixelRatio,3.2*uPixelRatio);
   }
 `;
 
 export const terrainFragmentShader=/* glsl */`
   uniform float uBloomThreshold,uBloomStrength,uBloomRadius,uExposure;
-  varying vec2 vGlyphUv;
-  varying float vBit,vAlpha,vBrightness,vActivity,vViewDepth;
+  varying float vAlpha,vBrightness,vActivity,vViewDepth;
   varying vec3 vColor;
-  float boxSdf(vec2 p,vec2 b){vec2 d=abs(p)-b;return length(max(d,0.))+min(max(d.x,d.y),0.);}
   void main(){
-    vec2 p=vGlyphUv-.5;
-    float zeroDistance=abs(length(p*vec2(.86,1.))-.285);
-    float oneDistance=min(boxSdf(p,vec2(.057,.31)),
-      min(boxSdf(p-vec2(0.,.30),vec2(.15,.048)),boxSdf(p+vec2(0.,.30),vec2(.15,.048))));
-    float distanceToGlyph=mix(zeroDistance,oneDistance,vBit);
-    float glyph=mix(1.-smoothstep(.045,.088,zeroDistance),
-      1.-smoothstep(.015,.052,oneDistance),vBit);
+    vec2 p=gl_PointCoord-.5;
+    float distanceToPoint=length(p*vec2(.96,1.));
+    float pointCore=1.-smoothstep(.23,.49,distanceToPoint);
     float bloomGate=smoothstep(uBloomThreshold,1.,vBrightness);
-    float halo=mix(1.-smoothstep(.08,.18+uBloomRadius*.12,zeroDistance),
-      1.-smoothstep(.045,.14+uBloomRadius*.1,oneDistance),vBit);
-    float glow=halo*bloomGate*uBloomStrength*.12;
-    float alpha=vAlpha*max(glyph,glow);
-    if(alpha<.008||distanceToGlyph>.31)discard;
+    float halo=(1.-smoothstep(.18,.5,distanceToPoint))*bloomGate*uBloomStrength*.09;
+    float alpha=vAlpha*max(pointCore,halo);
+    if(alpha<.008||distanceToPoint>.5)discard;
     vec3 color=vColor*(.72+vBrightness*.76+vActivity*.18)*uExposure;
-    color+=vColor*glow*1.4;
+    color+=vColor*halo*(1.1+uBloomRadius*.4);
     gl_FragColor=vec4(color,alpha);
   }
 `;

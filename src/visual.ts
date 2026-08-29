@@ -65,31 +65,31 @@ type CubeMatter={
 export type TerrainParameterKey='amplitude'|'macroFrequency'|'macroSpeed'|'mediumStrength'
   |'mediumFrequency'|'waveDirectionCount'|'localEventFrequency'|'localEventRadius'
   |'localEventStrength'|'localEventLifetime'|'simulationDamping'|'propagationStrength'
-  |'microDisplacement'|'binaryDensity'|'binaryFlipRate'|'activityFlipCoupling'
+  |'microDisplacement'|'pointDensity'
   |'edgeFadeStart'|'edgeFadeWidth'|'emission'|'warmWhiteIntensity'|'amberThreshold'
   |'redThreshold'|'aoStrength'|'bloomThreshold'|'bloomStrength'|'bloomRadius'
   |'exposure'|'fogAttenuation';
 type TerrainParameters=Record<TerrainParameterKey,number>;
 type TerrainMatter={
-  group:THREE.Group;mesh:THREE.Mesh;material:THREE.ShaderMaterial;
-  uniforms:Record<string,{value:number}>;
+  group:THREE.Group;points:THREE.Points;material:THREE.ShaderMaterial;
+  uniforms:Record<string,THREE.IUniform>;
   parameterUniforms:Record<TerrainParameterKey,{value:number}>;
 };
 
 const TERRAIN_DEFAULTS:TerrainParameters={
-  amplitude:.74,macroFrequency:.24,macroSpeed:.055,mediumStrength:.2,mediumFrequency:1.08,
-  waveDirectionCount:5,localEventFrequency:.82,localEventRadius:1.12,localEventStrength:.58,
-  localEventLifetime:4.8,simulationDamping:.92,propagationStrength:.46,microDisplacement:.032,
-  binaryDensity:.92,binaryFlipRate:1,activityFlipCoupling:.34,edgeFadeStart:.68,edgeFadeWidth:.3,
-  emission:.88,warmWhiteIntensity:.92,amberThreshold:.72,redThreshold:.93,aoStrength:.62,
+  amplitude:.8,macroFrequency:.24,macroSpeed:.1,mediumStrength:.23,mediumFrequency:1.08,
+  waveDirectionCount:9,localEventFrequency:1.25,localEventRadius:1.2,localEventStrength:.64,
+  localEventLifetime:3.8,simulationDamping:.92,propagationStrength:.52,microDisplacement:.022,
+  pointDensity:.96,edgeFadeStart:.56,edgeFadeWidth:.4,
+  emission:.88,warmWhiteIntensity:.92,amberThreshold:.82,redThreshold:.95,aoStrength:.62,
   bloomThreshold:.74,bloomStrength:.52,bloomRadius:.34,exposure:.94,fogAttenuation:.2,
 };
 const TERRAIN_LIMITS:Record<TerrainParameterKey,readonly[number,number]>={
   amplitude:[0,1.4],macroFrequency:[.04,.8],macroSpeed:[0,.4],mediumStrength:[0,.8],
-  mediumFrequency:[.2,3],waveDirectionCount:[1,5],localEventFrequency:[.1,2.5],
+  mediumFrequency:[.2,3],waveDirectionCount:[1,10],localEventFrequency:[.1,2.5],
   localEventRadius:[.2,2.8],localEventStrength:[0,1.4],localEventLifetime:[1,12],
   simulationDamping:[0,1],propagationStrength:[0,1.5],microDisplacement:[0,.18],
-  binaryDensity:[.15,1],binaryFlipRate:[0,3],activityFlipCoupling:[0,2],
+  pointDensity:[.15,1],
   edgeFadeStart:[.35,.95],edgeFadeWidth:[.05,.6],emission:[0,2],warmWhiteIntensity:[0,2],
   amberThreshold:[.2,.98],redThreshold:[.5,1],aoStrength:[0,1],bloomThreshold:[0,1],
   bloomStrength:[0,2],bloomRadius:[0,1],exposure:[.2,2],fogAttenuation:[0,1],
@@ -98,6 +98,8 @@ const TERRAIN_LIMITS:Record<TerrainParameterKey,readonly[number,number]>={
 export type CubeTransitionPhase='inactive'|'convergeToError'|'kernelHold'|'morphToSeed'
   |'seedOnly'|'expand'|'idle'|'collapseCube'|'reverseSeedOnly'|'seedToKernel'
   |'reverseKernelHold'|'releaseRibbons';
+export type TerrainTransitionPhase='inactive'|'convergeSource'|'sourceHold'
+  |'releasePoints'|'propagate'|'idle'|'collapsePoints'|'releaseTarget';
 export type VisualEntityKey='ribbons'|'kernel'|'chaos'|'seedCube'|'cubeCells'|'cubeLight';
 type VisualOwnership=Record<VisualEntityKey,boolean>;
 
@@ -233,6 +235,11 @@ export class CoreVisual{
   private terrainMatter:TerrainMatter;
   private terrainPresence=0;
   private terrainTransition=0;
+  private terrainConvergence=0;
+  private terrainSourceConsumption=0;
+  private terrainPhase:TerrainTransitionPhase='inactive';
+  private terrainEntrySource:'core'|'cube'|null=null;
+  private terrainPhaseElapsed=0;
   // 0..1 controls the shared matter reorganisation, independently of the
   // final CUBE idle animation.  Every existing state enters through it.
   private cubeTransition=0;
@@ -398,6 +405,21 @@ export class CoreVisual{
   setSnapshot(snapshot:Readonly<Snapshot>){
     const next=getVisualState(snapshot.state);
     if(next!==this.state){
+      if(next==='terrain'&&this.state!=='terrain'){
+        this.terrainEntrySource=this.state==='cube'?'cube':'core';
+        this.terrainPhase='convergeSource';
+        this.terrainPhaseElapsed=0;
+        this.terrainTransition=0;
+        this.terrainSourceConsumption=0;
+        const alreadyContained=this.state==='error'&&this.errorSignals.containment>.85;
+        this.terrainConvergence=alreadyContained?1:0;
+      }else if(this.state==='terrain'&&next!=='terrain'){
+        // Point coordinates remain persistent and simply run their formation
+        // mapping backwards into the same compact source.
+        this.terrainPhase='collapsePoints';
+        this.terrainPhaseElapsed=0;
+        this.terrainEntrySource='core';
+      }
       if(next==='cube'&&this.state!=='cube'){
         if(this.cubeReverseActive){
           // A re-entry during the reverse transition resumes from the exact
@@ -459,6 +481,7 @@ export class CoreVisual{
     this.visualEntityDebug[entity]=enabled;
   }
   getCubeTransitionPhase(){return this.cubePhase;}
+  getTerrainTransitionPhase(){return this.terrainPhase;}
 
   setCubeAmberBrightness(value:number){
     this.cubeAmberBrightness=THREE.MathUtils.clamp(value,0,2);
@@ -507,7 +530,7 @@ export class CoreVisual{
 
   private applyVisualOwnership(){
     const owned=this.getVisualOwnership(),debug=this.visualEntityDebug;
-    const terrainExclusive=this.state==='terrain'&&this.terrainPresence>.995;
+    const terrainExclusive=this.state==='terrain'&&this.terrainSourceConsumption>.995;
     const showRibbons=owned.ribbons&&debug.ribbons&&!terrainExclusive;
     this.ribbons.forEach(ribbon=>{
       ribbon.group.visible=showRibbons;
@@ -515,8 +538,14 @@ export class CoreVisual{
     });
     this.core.visible=owned.kernel&&debug.kernel&&!terrainExclusive;
     this.containmentChaos.visible=owned.chaos&&debug.chaos&&!terrainExclusive;
-    const showSeed=owned.seedCube&&debug.seedCube;
+    const terrainCubeSeed=this.state==='terrain'&&this.terrainEntrySource==='cube'
+      &&(this.terrainPhase==='sourceHold'||this.terrainPhase==='releasePoints'
+        ||this.terrainPhase==='propagate')&&this.terrainSourceConsumption<.995;
+    const showSeed=(owned.seedCube||terrainCubeSeed)&&debug.seedCube;
     const showCells=owned.cubeCells&&debug.cubeCells;
+    const terrainSeedScale=terrainCubeSeed
+      ?1-THREE.MathUtils.smoothstep(this.terrainSourceConsumption,.04,.94):1;
+    this.cubeMatter.group.scale.setScalar(terrainSeedScale);
     this.cubeMatter.group.visible=showSeed||showCells||(owned.cubeLight&&debug.cubeLight);
     this.cubeMatter.cells.visible=showCells;
     this.cubeMatter.seedCell.visible=showSeed;
@@ -553,49 +582,53 @@ export class CoreVisual{
   }
 
   /**
-   * Dense binary height field. One four-vertex glyph quad is instanced across
-   * the logical X/Z domain; deformation, normals, bit lifetimes, light and edge
-   * dissolution all remain on the GPU.
+   * Persistent point samples of a GPU height field. There is no carrier plane,
+   * glyph quad or texture: every vertex is one microscopic piece of TERRAIN.
    */
   private createTerrainMatter():TerrainMatter{
     const columns=CONFIG.EXPERIMENTS.terrainColumns,rows=CONFIG.EXPERIMENTS.terrainRows;
     const count=columns*rows;
-    const geometry=new THREE.InstancedBufferGeometry();
-    geometry.setAttribute('position',new THREE.Float32BufferAttribute([
-      -1,-1,0, 1,-1,0, 1,1,0, -1,1,0,
-    ],3));
-    geometry.setAttribute('uv',new THREE.Float32BufferAttribute([
-      0,0, 1,0, 1,1, 0,1,
-    ],2));
-    geometry.setIndex([0,1,2,0,2,3]);
-    const grid=new Float32Array(count*2),seeds=new Float32Array(count),bits=new Float32Array(count);
-    let instance=0;
-    for(let z=0;z<rows;z++)for(let x=0;x<columns;x++,instance++){
+    const geometry=new THREE.BufferGeometry();
+    const positions=new Float32Array(count*3),grid=new Float32Array(count*2);
+    const seeds=new Float32Array(count),formationDelays=new Float32Array(count);
+    let point=0;
+    for(let z=0;z<rows;z++)for(let x=0;x<columns;x++,point++){
       const px=(x/(columns-1)-.5)*CONFIG.EXPERIMENTS.terrainWidth;
       const pz=(z/(rows-1)-.5)*CONFIG.EXPERIMENTS.terrainDepth;
-      const seed=Math.abs(Math.sin((instance+1)*91.731+x*17.13+z*7.91)*43758.5453)%1;
-      grid[instance*2]=px;grid[instance*2+1]=pz;seeds[instance]=seed;
-      bits[instance]=seed>.5?1:0;
+      const seed=Math.abs(Math.sin((point+1)*91.731+x*17.13+z*7.91)*43758.5453)%1;
+      const ellipticalDistance=Math.hypot(px/(CONFIG.EXPERIMENTS.terrainWidth*.5),
+        pz/(CONFIG.EXPERIMENTS.terrainDepth*.5));
+      positions[point*3]=px;positions[point*3+2]=pz;
+      grid[point*2]=px;grid[point*2+1]=pz;seeds[point]=seed;
+      // Stable, slightly anisotropic arrival times make the formation front
+      // broad and irregular without turning persistent samples into particles.
+      formationDelays[point]=THREE.MathUtils.clamp(
+        ellipticalDistance*.72+(seed-.5)*.11+px/CONFIG.EXPERIMENTS.terrainWidth*.055,0,.9,
+      );
     }
-    geometry.setAttribute('aGrid',new THREE.InstancedBufferAttribute(grid,2));
-    geometry.setAttribute('aSeed',new THREE.InstancedBufferAttribute(seeds,1));
-    geometry.setAttribute('aBit',new THREE.InstancedBufferAttribute(bits,1));
-    geometry.instanceCount=count;
-    geometry.boundingSphere=new THREE.Sphere(new THREE.Vector3(),5.6);
+    geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));
+    geometry.setAttribute('aGrid',new THREE.BufferAttribute(grid,2));
+    geometry.setAttribute('aSeed',new THREE.BufferAttribute(seeds,1));
+    geometry.setAttribute('aFormationDelay',new THREE.BufferAttribute(formationDelays,1));
+    geometry.boundingSphere=new THREE.Sphere(new THREE.Vector3(),10.5);
 
     const parameterUniforms=Object.fromEntries(
       (Object.keys(TERRAIN_DEFAULTS) as TerrainParameterKey[]).map(key=>[key,{value:TERRAIN_DEFAULTS[key]}]),
     ) as Record<TerrainParameterKey,{value:number}>;
-    const uniforms:Record<string,{value:number}>={
+    const uniforms:Record<string,THREE.IUniform>={
       uTime:{value:0},uPresence:{value:0},uTopologyProgress:{value:0},
+      uPixelRatio:{value:this.renderer.getPixelRatio()},
+      uTerrainHalfSize:{value:new THREE.Vector2(
+        CONFIG.EXPERIMENTS.terrainWidth*.5,CONFIG.EXPERIMENTS.terrainDepth*.5,
+      )},
+      uSourcePosition:{value:new THREE.Vector3(-.08,.28,-.45)},
       uAmplitude:parameterUniforms.amplitude,uMacroFrequency:parameterUniforms.macroFrequency,
       uMacroSpeed:parameterUniforms.macroSpeed,uMediumStrength:parameterUniforms.mediumStrength,
       uMediumFrequency:parameterUniforms.mediumFrequency,uWaveDirectionCount:parameterUniforms.waveDirectionCount,
       uLocalEventFrequency:parameterUniforms.localEventFrequency,uLocalEventRadius:parameterUniforms.localEventRadius,
       uLocalEventStrength:parameterUniforms.localEventStrength,uLocalEventLifetime:parameterUniforms.localEventLifetime,
       uSimulationDamping:parameterUniforms.simulationDamping,uPropagationStrength:parameterUniforms.propagationStrength,
-      uMicroDisplacement:parameterUniforms.microDisplacement,uBinaryDensity:parameterUniforms.binaryDensity,
-      uBinaryFlipRate:parameterUniforms.binaryFlipRate,uActivityFlipCoupling:parameterUniforms.activityFlipCoupling,
+      uMicroDisplacement:parameterUniforms.microDisplacement,uPointDensity:parameterUniforms.pointDensity,
       uEdgeFadeStart:parameterUniforms.edgeFadeStart,uEdgeFadeWidth:parameterUniforms.edgeFadeWidth,
       uEmission:parameterUniforms.emission,uWarmWhiteIntensity:parameterUniforms.warmWhiteIntensity,
       uAmberThreshold:parameterUniforms.amberThreshold,uRedThreshold:parameterUniforms.redThreshold,
@@ -605,15 +638,14 @@ export class CoreVisual{
     };
     const material=new THREE.ShaderMaterial({
       uniforms,vertexShader:terrainVertexShader,fragmentShader:terrainFragmentShader,
-      transparent:true,depthWrite:false,depthTest:true,side:THREE.DoubleSide,
-      blending:THREE.NormalBlending,
+      transparent:true,depthWrite:false,depthTest:true,blending:THREE.NormalBlending,
     });
-    const mesh=new THREE.Mesh(geometry,material);mesh.frustumCulled=false;mesh.renderOrder=18;
-    const group=new THREE.Group();group.add(mesh);group.visible=false;
+    const points=new THREE.Points(geometry,material);points.frustumCulled=false;points.renderOrder=18;
+    const group=new THREE.Group();group.add(points);group.visible=false;
     // TERRAIN stays horizontal in world space. Perspective comes from the
     // state camera, not from rotating the field into an isometric view.
     group.rotation.set(0,0,0);group.position.set(.08,-.28,.45);
-    return{group,mesh,material,uniforms,parameterUniforms};
+    return{group,points,material,uniforms,parameterUniforms};
   }
 
   /**
@@ -723,12 +755,21 @@ export class CoreVisual{
   private updateCubeMatter(dt:number,time:number){
     const cube=this.cubeMatter;
     const transitionStep=dt*this.cubeTransitionTimeScale/CONFIG.EXPERIMENTS.cubeTransitionSeconds;
-    if(this.state==='cube'){
+    const terrainExitBlocksCube=this.state==='cube'&&(
+      this.terrainPhase==='collapsePoints'||this.terrainPhase==='releaseTarget'
+    );
+    if(this.state==='cube'&&!terrainExitBlocksCube){
       this.cubeTransition=Math.min(1,this.cubeTransition+transitionStep);
     }else if(this.cubeReverseActive){
-      this.cubeTransition=Math.max(0,this.cubeTransition-transitionStep);
+      const seedOnlyEnd=(CONFIG.EXPERIMENTS.cubeCoreGatherSeconds
+        +CONFIG.EXPERIMENTS.cubeCoreHoldSeconds+CONFIG.EXPERIMENTS.cubeSeedMorphSeconds
+        +CONFIG.EXPERIMENTS.cubeSeedOnlySeconds)/CONFIG.EXPERIMENTS.cubeTransitionSeconds;
+      // CUBE -> TERRAIN reuses the normal reverse collapse verbatim, then
+      // holds at its existing one-seed phase until point ownership begins.
+      const reverseFloor=this.state==='terrain'&&this.terrainEntrySource==='cube'?seedOnlyEnd:0;
+      this.cubeTransition=Math.max(reverseFloor,this.cubeTransition-transitionStep);
       if(this.cubeTransition<=0)this.cubeReverseActive=false;
-    }else{
+    }else if(!terrainExitBlocksCube){
       this.cubeTransition=0;
     }
     const elapsed=this.cubeTransition*CONFIG.EXPERIMENTS.cubeTransitionSeconds;
@@ -797,7 +838,7 @@ export class CoreVisual{
       const center=cube.centers[i];
       this.cubeAxis.set(Math.sin(cube.seeds[i]*71.3),Math.cos(cube.seeds[i]*127.1),Math.sin(cube.seeds[i]*193.7)+.18).normalize();
       if(i===cube.seedIndex){
-        // A 10x10x10 lattice has no mathematical centre cell. The seed is the
+        // An even-axis lattice has no mathematical centre cell. The seed is the
         // conserved transition matter, so it remains at the origin instead of
         // sliding into an off-centre lattice slot when expansion begins.
         this.cubePosition.set(0,0,0);
@@ -853,6 +894,102 @@ export class CoreVisual{
     }
   }
 
+  private updateTerrainTransition(dt:number){
+    const scaledDt=dt*this.cubeTransitionTimeScale;
+    const gatherDuration=CONFIG.EXPERIMENTS.terrainCoreGatherSeconds;
+    const holdDuration=CONFIG.EXPERIMENTS.terrainSourceHoldSeconds;
+    const propagationDuration=CONFIG.EXPERIMENTS.terrainTransitionSeconds;
+    const seedOnlyEnd=(CONFIG.EXPERIMENTS.cubeCoreGatherSeconds
+      +CONFIG.EXPERIMENTS.cubeCoreHoldSeconds+CONFIG.EXPERIMENTS.cubeSeedMorphSeconds
+      +CONFIG.EXPERIMENTS.cubeSeedOnlySeconds)/CONFIG.EXPERIMENTS.cubeTransitionSeconds;
+
+    if(this.state==='terrain'){
+      if(this.terrainPhase==='convergeSource'){
+        if(this.terrainEntrySource==='cube'){
+          // updateCubeMatter owns this motion. Terrain only observes when the
+          // established reverse animation has reached its single seed.
+          this.terrainConvergence=1;
+          if(this.cubeTransition<=seedOnlyEnd+.0001){
+            this.terrainPhase='sourceHold';this.terrainPhaseElapsed=0;
+          }
+        }else{
+          this.terrainPhaseElapsed+=scaledDt;
+          this.terrainConvergence=THREE.MathUtils.smoothstep(
+            this.terrainPhaseElapsed,0,gatherDuration,
+          );
+          if(this.terrainPhaseElapsed>=gatherDuration){
+            this.terrainConvergence=1;
+            this.terrainPhase='sourceHold';this.terrainPhaseElapsed=0;
+          }
+        }
+      }else if(this.terrainPhase==='sourceHold'){
+        this.terrainConvergence=1;
+        this.terrainPhaseElapsed+=scaledDt;
+        if(this.terrainPhaseElapsed>=holdDuration){
+          this.terrainPhase='releasePoints';this.terrainPhaseElapsed=0;
+        }
+      }else if(this.terrainPhase==='releasePoints'||this.terrainPhase==='propagate'){
+        this.terrainTransition=Math.min(1,
+          this.terrainTransition+scaledDt/propagationDuration,
+        );
+        this.terrainConvergence=1;
+        this.terrainSourceConsumption=THREE.MathUtils.smoothstep(
+          this.terrainTransition,.015,.27,
+        );
+        this.terrainPhase=this.terrainTransition<.68?'releasePoints':'propagate';
+        if(this.terrainEntrySource==='cube'&&this.terrainSourceConsumption>.97){
+          // The seed has been consumed by point matter. Ending the reverse
+          // controller here prevents it from continuing on to Kernel.
+          this.cubeReverseActive=false;this.cubeTransition=0;
+        }
+        if(this.terrainTransition>=1){
+          this.terrainTransition=1;this.terrainSourceConsumption=1;
+          this.terrainPhase='idle';this.terrainEntrySource=null;
+        }
+      }else if(this.terrainPhase==='idle'){
+        this.terrainTransition=1;this.terrainConvergence=1;
+        this.terrainSourceConsumption=1;
+      }
+    }else if(this.terrainPhase==='collapsePoints'){
+      this.terrainTransition=Math.max(0,
+        this.terrainTransition-scaledDt/propagationDuration,
+      );
+      this.terrainConvergence=1;
+      this.terrainSourceConsumption=THREE.MathUtils.smoothstep(
+        this.terrainTransition,.015,.27,
+      );
+      if(this.terrainTransition<=0){
+        this.terrainTransition=0;this.terrainSourceConsumption=0;
+        if(this.state==='cube'){
+          // TERRAIN has already delivered the canonical compact source, so a
+          // following CUBE entry can begin at Kernel hold instead of releasing
+          // ribbons only to gather them a second time.
+          this.cubeTransition=CONFIG.EXPERIMENTS.cubeCoreGatherSeconds
+            /CONFIG.EXPERIMENTS.cubeTransitionSeconds;
+          this.terrainConvergence=0;this.terrainPhase='inactive';
+          this.terrainEntrySource=null;
+        }else{
+          this.terrainPhase='releaseTarget';this.terrainPhaseElapsed=0;
+        }
+      }
+    }else if(this.terrainPhase==='releaseTarget'){
+      this.terrainPhaseElapsed+=scaledDt;
+      this.terrainConvergence=1-THREE.MathUtils.smoothstep(
+        this.terrainPhaseElapsed,0,CONFIG.EXPERIMENTS.terrainTargetReleaseSeconds,
+      );
+      if(this.terrainConvergence<=0){
+        this.terrainConvergence=0;this.terrainPhase='inactive';
+        this.terrainEntrySource=null;
+      }
+    }
+
+    const terrainTarget=THREE.MathUtils.smoothstep(this.terrainTransition,.015,.2);
+    this.terrainPresence=damp(this.terrainPresence,terrainTarget,dt,9.5);
+    this.terrainMatter.uniforms.uPresence.value=this.terrainPresence;
+    this.terrainMatter.uniforms.uTopologyProgress.value=this.terrainTransition;
+    this.terrainMatter.group.visible=this.terrainPresence>.002;
+  }
+
   private createRibbon(index:number):Ribbon{
     const radius=CONFIG.RIBBON_RADII[index];
     const geometry=createMobiusGeometry(radius,CONFIG.RIBBON_HALF_WIDTHS[index]);
@@ -893,6 +1030,7 @@ export class CoreVisual{
   private resize(){
     const parent=this.renderer.domElement.parentElement!,width=parent.clientWidth,height=parent.clientHeight;
     this.renderer.setSize(width,height,false);this.camera.aspect=width/height;this.camera.updateProjectionMatrix();
+    if(this.terrainMatter)this.terrainMatter.uniforms.uPixelRatio.value=this.renderer.getPixelRatio();
   }
 
   private blendState(dt:number){
@@ -921,7 +1059,9 @@ export class CoreVisual{
     u.uGradientDamage.value=this.criticalSignals.gradientDamage;
     u.uGeometryDamage.value=this.criticalSignals.geometryDamage;
     u.uDepthFade.value=this.lightingDebug.depthFade?CONFIG.LIGHTING.depthFadeStrength:0;
-    u.uTerrainMorph.value=this.terrainTransition;
+    // TERRAIN no longer flattens legacy geometry into a carrier plane. The
+    // compact source is consumed directly by persistent point samples.
+    u.uTerrainMorph.value=0;
     u.uReliefActivity.value=this.workRibbonReliefStrength;u.uWorkRelief.value=this.workRibbonRelief;
     u.uRgbSplit.value=this.state==='error'?THREE.MathUtils.clamp(
       this.errorSignals.distortion*.55+this.errorSignals.tear*.9
@@ -944,7 +1084,7 @@ export class CoreVisual{
       const cubeLightAllowed=this.state!=='cube'||this.visualEntityDebug.cubeLight;
       light.intensity=debug.indirectLightSpill&&cubeLightAllowed
         ?CONFIG.LIGHTING.spillIntensity*(.17+this.current.energy*.08)
-          *(1-this.terrainPresence)*(1-cubeVioletPresence):0;
+          *(1-this.terrainSourceConsumption)*(1-cubeVioletPresence):0;
       light.visible=true;
       // Legacy Kernel emitters fade away completely as the dedicated internal
       // CUBE violet source takes over. They never move outside the cube.
@@ -956,7 +1096,8 @@ export class CoreVisual{
       ribbon.surface.position.copy(ribbon.mesh.position);
       ribbon.surface.visible=ribbon.uniforms.uVisibility.value>.01&&this.cubeMatter.presence<.997;
       const surfaceMaterial=ribbon.surface.material as THREE.MeshStandardMaterial;
-      surfaceMaterial.opacity=CONFIG.LIGHTING.surfaceOpacity*(1-this.cubeMatter.presence)*(1-this.terrainPresence);
+      surfaceMaterial.opacity=CONFIG.LIGHTING.surfaceOpacity*(1-this.cubeMatter.presence)
+        *(1-this.terrainSourceConsumption);
       surfaceMaterial.emissiveIntensity=debug.emissive
         ?CONFIG.LIGHTING.ribbonEmission*(.62+this.current.energy*.28):0;
     });
@@ -1003,18 +1144,9 @@ export class CoreVisual{
   update(dt:number,time:number){
     this.blendState(dt);
     this.updateCubeMatter(dt,time);
+    this.updateTerrainTransition(dt);
     const cubeTopologyActive=this.state==='cube'||this.cubeReverseActive;
-    const terrainCanEnter=this.state==='terrain'&&!this.cubeReverseActive&&this.cubeTransition<=0;
-    const terrainStep=dt*this.cubeTransitionTimeScale/CONFIG.EXPERIMENTS.terrainTransitionSeconds;
-    this.terrainTransition=THREE.MathUtils.clamp(
-      this.terrainTransition+(terrainCanEnter?terrainStep:-terrainStep),0,1,
-    );
-    const terrainTarget=THREE.MathUtils.smoothstep(this.terrainTransition,.08,.82);
-    this.terrainPresence=damp(this.terrainPresence,terrainTarget,dt,8.5);
     this.terrainMatter.uniforms.uTime.value=time;
-    this.terrainMatter.uniforms.uPresence.value=this.terrainPresence;
-    this.terrainMatter.uniforms.uTopologyProgress.value=this.terrainTransition;
-    this.terrainMatter.group.visible=this.terrainPresence>.002;
     // CALM and WORK are the same chaotic matter at different scales/speeds.
     // Keeping one representation removes the old sphere-over-chaos crossfade.
     this.workCoreChaos=damp(this.workCoreChaos,this.state==='work'?1:0,dt,2.8);
@@ -1053,9 +1185,9 @@ export class CoreVisual{
     this.errorSignals.jerk=THREE.MathUtils.clamp(phaseError.jerk+criticalJerk,-1,1);
     this.errorSignals.seed=critical.severity>.015?critical.seed:phaseError.seed;
     const containment=this.errorSignals.containment;
-    // Entering CUBE uses the same physical containment destination as the
-    // final ERROR phase, then reorders that contained matter into a lattice.
-    const topologyContainment=Math.max(containment,cubeGather);
+    // CUBE and TERRAIN share the same compact containment destination, while
+    // retaining independent phase controllers after that canonical source.
+    const topologyContainment=Math.max(containment,cubeGather,this.terrainConvergence);
     const rebuildingFromContainment=containment>.002&&(
       this.state==='calm'||this.state==='work'||this.state==='critical2'||critical.previewMode>0
     );
@@ -1091,7 +1223,8 @@ export class CoreVisual{
     const legacyKernelAllowed=!cubeTopologyActive||
       this.cubePhase==='convergeToError'||this.cubePhase==='kernelHold'||
       this.cubePhase==='reverseKernelHold'||this.cubePhase==='releaseRibbons';
-    this.coreUniforms.uVisibility.value=legacyKernelAllowed?coreVisibility*(1-this.terrainPresence):0;
+    this.coreUniforms.uVisibility.value=legacyKernelAllowed
+      ?coreVisibility*(1-this.terrainSourceConsumption):0;
     const dynamicCoreX=Math.sin(time*.19)*.075+Math.sin(time*.071)*.025;
     const cubeCoreRotation=cubeTopologyActive?0:this.frozenCoreRotation.x;
     const cubeCoreYaw=cubeTopologyActive?0:this.frozenCoreRotation.y;
@@ -1110,14 +1243,14 @@ export class CoreVisual{
       uniforms.uTime.value=this.chaosLayerTimes[index];
       // The sphere's mass is removed only as individual cells complete.
       // The fragment shader turns this mass loss into clustered holes/streams.
-      uniforms.uIntensity.value=chaosIntensity*(1-this.terrainPresence);
+      uniforms.uIntensity.value=chaosIntensity*(1-this.terrainSourceConsumption);
       uniforms.uSeed.value=this.errorSignals.seed+(index===0?.17:.73);
       uniforms.uLiving.value=this.livingChaosMix;
       uniforms.uMatterRemaining.value=cubeTopologyActive?this.cubeMatter.matterRemaining:1;
       uniforms.uConversion.value=cubeTopologyActive?this.cubeSeedMorph:0;
       uniforms.uCompression.value=cubeTopologyActive?this.cubeCompression:0;
       uniforms.uSeedMorph.value=cubeTopologyActive?this.cubeSeedMorph:0;
-      uniforms.uTerrainMorph.value=this.terrainTransition;
+      uniforms.uTerrainMorph.value=0;
       uniforms.uSeedCenter.value.set(0,0,0);
     });
     this.coreChaosUniforms.uTime.value=this.coreChaosTime;
@@ -1134,10 +1267,11 @@ export class CoreVisual{
       this.cubePhase==='convergeToError'||this.cubePhase==='kernelHold'||
       this.cubePhase==='reverseKernelHold'||this.cubePhase==='releaseRibbons'
     )?.82:0;
-    this.coreChaosUniforms.uVisibility.value=Math.max(faultDigits,cubeBinaryReservoir)*(1-this.terrainPresence);
+    this.coreChaosUniforms.uVisibility.value=Math.max(faultDigits,cubeBinaryReservoir)
+      *(1-this.terrainSourceConsumption);
     this.coreChaosUniforms.uCompression.value=cubeTopologyActive?this.cubeCompression:0;
     this.coreChaosUniforms.uSeedMorph.value=cubeTopologyActive?this.cubeSeedMorph:0;
-    this.coreChaosUniforms.uTerrainMorph.value=this.terrainTransition;
+    this.coreChaosUniforms.uTerrainMorph.value=0;
     this.coreChaosUniforms.uSeedCenter.value.set(0,0,0);
     // The remaining chaos compacts as actual mass leaves for stabilised cells;
     // holes are generated in its shader at the same time, avoiding a plain
@@ -1181,7 +1315,7 @@ export class CoreVisual{
       ribbon.uniforms.uGeometryDamage.value*=localDamage;
       const collapseBlend=rebuildingFromContainment?0:this.errorSignals.collapse;
       ribbon.uniforms.uVisibility.value=(1-collapseBlend*(index===1?0:.72))*(1-topologyContainment*.995)
-        *(1-this.cubeMatter.presence)*(1-this.terrainPresence);
+        *(1-this.cubeMatter.presence)*(1-this.terrainSourceConsumption);
       const particles=ribbon.particleUniforms;
       const phaseParticleIntensity=Math.max(
         phaseError.distortion,phaseError.tear,phaseError.collapse,phaseError.eject,
@@ -1240,7 +1374,7 @@ export class CoreVisual{
         const baseGhostAlpha=baseGhost*(ghost.lag<.1?1:.56);
         const damageGhostAlpha=critical.ghost*localDamage*(ghost.lag<.1?.28:.16);
         ghost.uniforms.uVisibility.value=Math.max(baseGhostAlpha,damageGhostAlpha)*(1-topologyContainment)
-          *(1-this.cubeMatter.presence)*(1-this.terrainPresence);
+          *(1-this.cubeMatter.presence)*(1-this.terrainSourceConsumption);
         ghost.uniforms.uSaturation.value=ghost.lag<.1?.56:.22;
         ghost.group.rotation.set(
           ribbon.group.rotation.x-ghost.lag*(.25+critical.timeDesync),
@@ -1274,13 +1408,13 @@ export class CoreVisual{
     const terrainCamera=THREE.MathUtils.smoothstep(this.terrainPresence,.03,.96);
     this.camera.position.set(
       0,
-      THREE.MathUtils.lerp(0,.48,terrainCamera),
-      THREE.MathUtils.lerp(CONFIG.CAMERA_Z,4.35,terrainCamera),
+      THREE.MathUtils.lerp(0,.18,terrainCamera),
+      THREE.MathUtils.lerp(CONFIG.CAMERA_Z,4.55,terrainCamera),
     );
-    this.camera.fov=THREE.MathUtils.lerp(34,42,terrainCamera);
+    this.camera.fov=THREE.MathUtils.lerp(34,39,terrainCamera);
     this.camera.updateProjectionMatrix();
-    this.cameraTarget.set(0,THREE.MathUtils.lerp(0,-.08,terrainCamera),
-      THREE.MathUtils.lerp(0,-.75,terrainCamera));
+    this.cameraTarget.set(0,THREE.MathUtils.lerp(0,-.18,terrainCamera),
+      THREE.MathUtils.lerp(0,-3.3,terrainCamera));
     this.camera.lookAt(this.cameraTarget);
     this.renderer.render(this.scene,this.camera);
   }
