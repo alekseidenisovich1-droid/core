@@ -71,10 +71,11 @@ export const CONFIG = {
     terrainColumns: 240,
     terrainRows: 180,
     terrainWidth: 14,
-    terrainDepth: 12,
+    terrainDepth: 6,
     terrainTransitionSeconds: 3.1,
     terrainCoreGatherSeconds: 1.2,
     terrainSourceHoldSeconds: .5,
+    terrainCoreMorphSeconds: .9,
     terrainTargetReleaseSeconds: 1.2,
   },
 } as const;

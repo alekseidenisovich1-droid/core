@@ -3,9 +3,10 @@ export const vertexShader=/* glsl */`
   uniform float uWavePhase,uWaveAmplitude,uWaveComplexity,uDeformation,uWidthVariation,uTwist;
   uniform float uErrorDistort,uErrorTear,uErrorCollapse,uErrorEject,uErrorContainment,uErrorJerk,uErrorSeed;
   uniform float uGeometryDamage,uReliefActivity,uWorkRelief,uReliefRatio,uTerrainMorph;
+  uniform float uRibbonAbsorption,uRibbonAbsorptionAnchor;
   varying vec2 vUv;
   varying vec3 vPos,vNormal;
-  varying float vWave,vViewDepth;
+  varying float vWave,vViewDepth,vRibbonAbsorption;
 
   vec3 rotateAroundAxis(vec3 value,vec3 axis,float angle){
     return value*cos(angle)+cross(axis,value)*sin(angle)+axis*dot(axis,value)*(1.0-cos(angle));
@@ -72,6 +73,17 @@ export const vertexShader=/* glsl */`
       p+=normal*(organismWave*uWaveAmplitude*(.14+activity*.06)
         +coreField*uDeformation*(.12+activity*.05))*(1.-uErrorContainment);
     }
+    // Terrain topology is transferred along the strip, not by scaling the
+    // complete Möbius object. The closest arc enters the compact sink first;
+    // the spatial front then consumes both remaining tails of the closed strip.
+    float absorptionArc=abs(fract(surfaceU-uRibbonAbsorptionAnchor+.5)-.5)*2.;
+    float absorptionFront=uRibbonAbsorption*1.16-.08;
+    vRibbonAbsorption=(1.-smoothstep(absorptionFront-.105,absorptionFront+.105,absorptionArc))
+      *step(.5,uMobius)*step(.001,uRibbonAbsorption);
+    float suctionZone=smoothstep(.0,1.,vRibbonAbsorption);
+    float sinkRipple=sin(surfaceU*31.415926+uOffset*17.)*.018*(1.-suctionZone);
+    vec3 sinkTarget=normalize(p+vec3(.001))*max(.035,.105+sinkRipple);
+    p=mix(p,sinkTarget,suctionZone);
     // The safety shell becomes mechanically still while the failure continues
     // moving underneath it.
     p=mix(p,position,uErrorContainment);
@@ -107,7 +119,7 @@ export const fragmentShader=/* glsl */`
   uniform float uErrorStructure,uMissingData,uGradientDamage;
   varying vec2 vUv;
   varying vec3 vPos,vNormal;
-  varying float vWave,vViewDepth;
+  varying float vWave,vViewDepth,vRibbonAbsorption;
 
   float hash21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
   float boxSdf(vec2 p,vec2 b){vec2 d=abs(p)-b;return length(max(d,0.0))+min(max(d.x,d.y),0.0);}
@@ -193,7 +205,8 @@ export const fragmentShader=/* glsl */`
     float split=clamp(uRgbSplit*(1.-uErrorContainment),0.,1.);
     vec3 channelMask=mix(vec3(glyph),vec3(redGlyph,glyph,blueGlyph),split);
     float mask=max(channelMask.r,max(channelMask.g,channelMask.b));
-    float alpha=mask*(.78+fresnel*.19)*waveGlow*glitchVisibility*uVisibility;
+    float unabsorbed=1.-smoothstep(.64,.995,vRibbonAbsorption);
+    float alpha=mask*(.78+fresnel*.19)*waveGlow*glitchVisibility*uVisibility*unabsorbed;
     if(alpha<.025)discard;
     vec3 stableRgb=color*(.84+uEnergy*.25+fresnel*.38)*waveGlow;
     vec3 splitRgb=vec3(color.r*channelMask.r,color.g*channelMask.g,color.b*channelMask.b)
@@ -248,7 +261,7 @@ export const particleVertexShader=/* glsl */`
 `;
 
 export const containmentVertexShader=/* glsl */`
-  uniform float uTime,uIntensity,uSeed,uLayer,uLiving,uCompression,uSeedMorph,uTerrainMorph;
+  uniform float uTime,uIntensity,uSeed,uLayer,uLiving,uCompression,uSeedMorph,uTerrainMorph,uFillProgress;
   uniform vec3 uSeedCenter;
   varying vec3 vObjectPos,vNormal;
   varying float vPressure;
@@ -284,7 +297,7 @@ export const containmentVertexShader=/* glsl */`
     float activeField=mix(originalField,livingField,uLiving);
     vPressure=.5+.5*activeField;
     vec3 compressed=position*(1.-uCompression*.48)
-      +normal*activeField*.045*uIntensity*(1.-uCompression*.72);
+      +normal*activeField*.045*uIntensity*(1.-uCompression*.72)*mix(.18,1.,uFillProgress);
     float maxAxis=max(max(abs(direction.x),abs(direction.y)),abs(direction.z));
     float seedHalf=mix(.118,.078,uLayer);
     vec3 cubeSurface=uSeedCenter+direction/max(maxAxis,.001)*seedHalf;
@@ -300,7 +313,7 @@ export const containmentVertexShader=/* glsl */`
 `;
 
 export const containmentFragmentShader=/* glsl */`
-  uniform float uTime,uIntensity,uSeed,uLayer,uMatterRemaining,uConversion;
+  uniform float uTime,uIntensity,uSeed,uLayer,uMatterRemaining,uConversion,uFillProgress,uTerrainWarm;
   varying vec3 vObjectPos,vNormal;
   varying float vPressure;
   float hash31(vec3 p){p=fract(p*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}
@@ -316,6 +329,16 @@ export const containmentFragmentShader=/* glsl */`
     vec3 color=mix(layerBase,pink,.28+.34*sin(scroll+uTime*2.1));
     color=mix(color,cyan,blocks*(.18+.42*pulse)*(1.-uLayer*.35));
     color+=vec3(1.,.3,.72)*pulse*.42;
+    // Transition warmth migrates through stable spatial regions instead of
+    // replacing the complete Chaos object with a homogeneous yellow sphere.
+    float warmRegion=smoothstep(.3,.78,hash31(floor(q*.38)+uSeed*17.)+vPressure*.16);
+    vec3 smoked=vec3(.095,.082,.071),warm=vec3(.78,.43,.15);
+    vec3 transitionColor=mix(smoked,warm,.22+.5*pulse);
+    // A Terrain-owned CHAOS must read as graphite/amber matter rather than a
+    // magenta sphere with a few yellow freckles. Spatial variation preserves
+    // both living shells and avoids a homogeneous solid-yellow ball.
+    float terrainPalette=uTerrainWarm*(.52+.43*warmRegion);
+    color=mix(color,transitionColor,terrainPalette);
     // Matter is removed in clustered local regions as its assigned cube cells
     // become structural. This is driven by formed mass, not a global fade.
     float cellNoise=hash31(floor(q*.47)+floor(uTime*.18)+uSeed*11.);
@@ -324,14 +347,16 @@ export const containmentFragmentShader=/* glsl */`
     vec3 graphite=vec3(.16,.145,.14),silver=vec3(.58,.52,.43);
     color=mix(color,mix(graphite,silver,pulse*.32),uConversion*(.35+.4*cellNoise));
     float fresnel=pow(1.-abs(dot(normalize(vNormal),vec3(0.,0.,1.))),2.);
-    float alpha=uIntensity*(.14+vPressure*.24+blocks*.12+pulse*.18+fresnel*.1)*retained;
+    float alpha=uIntensity*(.14+vPressure*.24+blocks*.12+pulse*.18+fresnel*.1)*retained
+      *mix(.12,1.,uFillProgress)*mix(1.,.72,uTerrainWarm);
     gl_FragColor=vec4(color*(.78+pulse*.65),alpha);
   }
 `;
 
 export const coreChaosVertexShader=/* glsl */`
   attribute float aSeed;
-  uniform float uTime,uIntensity,uVisibility,uPixelRatio,uCompression,uSeedMorph,uTerrainMorph;
+  uniform float uTime,uIntensity,uVisibility,uPixelRatio,uCompression,uSeedMorph,uTerrainMorph,uFillProgress;
+  uniform float uTransitionWarm;
   uniform vec3 uSeedCenter;
   varying float vAlpha,vBit,vHue;
   float hash11(float p){return fract(sin(p*127.1)*43758.5453);}
@@ -362,14 +387,17 @@ export const coreChaosVertexShader=/* glsl */`
     p=mix(p,terrainPlane,smoothstep(.03,.97,uTerrainMorph+(random-.5)*.08));
     vec4 mv=modelViewMatrix*vec4(p,1.);
     gl_Position=projectionMatrix*mv;
-    gl_PointSize=(2.5+random*2.8+burst*2.)*(1.+uCompression*.42)*uPixelRatio*clamp(7./-mv.z,.62,1.45);
-    vAlpha=uVisibility*(.34+random*.42+burst*.28);
+    gl_PointSize=(2.5+random*2.8+burst*2.)*(1.+uCompression*.42)*uPixelRatio
+      *clamp(7./-mv.z,.62,1.45)*mix(1.,.72,uTransitionWarm);
+    float retainedByFill=step(random,uFillProgress);
+    vAlpha=uVisibility*(.34+random*.42+burst*.28)*retainedByFill*mix(1.,.58,uTransitionWarm);
     vBit=step(.5,hash11(aSeed*29.7));
     vHue=fract(hash11(aSeed*47.1)+uTime*(.08+random*.16)+burst*.23);
   }
 `;
 
 export const particleFragmentShader=/* glsl */`
+  uniform float uTransitionWarm;
   varying float vAlpha,vBit,vHue;
   float boxSdf(vec2 p,vec2 b){vec2 d=abs(p)-b;return length(max(d,0.))+min(max(d.x,d.y),0.);}
   void main(){
@@ -382,10 +410,17 @@ export const particleFragmentShader=/* glsl */`
     if(glyph<.04||vAlpha<.015)discard;
     vec3 pink=vec3(1.,.04,.52),cyan=vec3(.15,.8,1.),purple=vec3(.43,.08,1.);
     vec3 color=mix(mix(pink,cyan,step(.66,vHue)),purple,step(.83,vHue));
+    float warmRegion=smoothstep(.28,.82,fract(vHue*7.13+vBit*.37));
+    vec3 transitionColor=mix(vec3(.11,.095,.08),vec3(1.,.48,.13),warmRegion);
+    color=mix(color,transitionColor,uTransitionWarm*(.28+.72*warmRegion));
     gl_FragColor=vec4(color*1.35,glyph*vAlpha);
   }
 `;
 
+// A compact Terrain-owned point reservoir. It is intentionally made from
+// round Terrain-like samples rather than binary glyphs, so it cannot read as
+// the ERROR Disco Ball. During the handoff the samples settle onto the two
+// Mini Chaos shell targets while those real surfaces become readable.
 // Binary matter is topology-agnostic: the cube provides cell centres and this
 // layer supplies the 0/1 atoms that can detach and later reconstruct a cell.
 export const cubeGlyphVertexShader=/* glsl */`
@@ -444,14 +479,14 @@ export const cubeGlyphFragmentShader=/* glsl */`
 export const terrainVertexShader=/* glsl */`
   attribute vec2 aGrid;
   attribute float aSeed,aFormationDelay;
-  uniform float uTime,uPresence,uTopologyProgress,uPixelRatio,uAmplitude,uMacroFrequency,uMacroSpeed;
+  uniform float uTime,uPresence,uTopologyProgress,uFormationDirection,uTransitionWarm;
+  uniform float uPixelRatio,uAmplitude,uMacroFrequency,uMacroSpeed;
   uniform float uMediumStrength,uMediumFrequency,uWaveDirectionCount;
   uniform float uLocalEventFrequency,uLocalEventRadius,uLocalEventStrength,uLocalEventLifetime;
   uniform float uSimulationDamping,uPropagationStrength,uMicroDisplacement;
   uniform float uEdgeFadeStart,uEdgeFadeWidth,uPointDensity,uEmission;
   uniform float uWarmWhiteIntensity,uAmberThreshold,uRedThreshold,uAoStrength,uFogAttenuation;
   uniform vec2 uTerrainHalfSize;
-  uniform vec3 uSourcePosition;
   varying float vAlpha,vBrightness,vActivity,vViewDepth;
   varying vec3 vColor;
 
@@ -509,12 +544,25 @@ export const terrainVertexShader=/* glsl */`
     medium*=uMediumStrength/sqrt(max(1.,uWaveDirectionCount));
 
     float eventClock=activeClock/max(uLocalEventLifetime,.5)*uLocalEventFrequency;
-    vec2 c0=vec2(sin(eventClock*.47+1.3)*3.15,cos(eventClock*.31+.2)*2.18);
-    vec2 c1=vec2(cos(eventClock*.29+2.1)*3.42,sin(eventClock*.53+1.7)*2.35);
-    vec2 c2=vec2(sin(eventClock*.37+4.2)*2.86,cos(eventClock*.43+3.1)*2.52);
-    vec2 c3=vec2(cos(eventClock*.41+.7)*3.7,sin(eventClock*.27+5.4)*1.92);
-    vec2 c4=vec2(sin(eventClock*.33+3.8)*2.48,cos(eventClock*.59+2.6)*2.75);
-    vec2 c5=vec2(cos(eventClock*.23+5.1)*3.22,sin(eventClock*.49+.9)*2.16);
+    // Three stable left-to-right traversals and three right-to-left. Each wrap
+    // is aligned with sin(angle)=-1, where its preserved life envelope is zero,
+    // so a live pressure front can never teleport across the field.
+    float angle0=eventClock*.71+.4,angle1=eventClock*.57+2.3;
+    float angle2=eventClock*.83+4.7,angle3=eventClock*.63+1.8;
+    float angle4=eventClock*.77+3.4,angle5=eventClock*.51+5.9;
+    float phase0=fract((angle0+1.570796327)/6.283185307);
+    float phase1=fract((angle1+1.570796327)/6.283185307);
+    float phase2=fract((angle2+1.570796327)/6.283185307);
+    float phase3=fract((angle3+1.570796327)/6.283185307);
+    float phase4=fract((angle4+1.570796327)/6.283185307);
+    float phase5=fract((angle5+1.570796327)/6.283185307);
+    float horizontalSpan=uTerrainHalfSize.x*.86;
+    vec2 c0=vec2(mix(-horizontalSpan,horizontalSpan,phase0),-1.22+sin(eventClock*.13+.2)*.16);
+    vec2 c1=vec2(mix(horizontalSpan,-horizontalSpan,phase1),-.74+sin(eventClock*.11+1.7)*.19);
+    vec2 c2=vec2(mix(-horizontalSpan,horizontalSpan,phase2),-.24+sin(eventClock*.09+3.1)*.14);
+    vec2 c3=vec2(mix(horizontalSpan,-horizontalSpan,phase3),.26+sin(eventClock*.12+5.4)*.17);
+    vec2 c4=vec2(mix(-horizontalSpan,horizontalSpan,phase4),.76+sin(eventClock*.08+2.6)*.2);
+    vec2 c5=vec2(mix(horizontalSpan,-horizontalSpan,phase5),1.24+sin(eventClock*.1+.9)*.15);
     float life0=smoothstep(-.72,-.08,sin(eventClock*.71+.4))*(1.-smoothstep(.38,.93,sin(eventClock*.71+.4)));
     float life1=smoothstep(-.8,-.18,sin(eventClock*.57+2.3))*(1.-smoothstep(.34,.91,sin(eventClock*.57+2.3)));
     float life2=smoothstep(-.76,-.12,sin(eventClock*.83+4.7))*(1.-smoothstep(.4,.94,sin(eventClock*.83+4.7)));
@@ -542,33 +590,27 @@ export const terrainVertexShader=/* glsl */`
     float activity=clamp(temporal*9.+length(vec2(hx-h,hz-h))*3.2,0.,1.);
 
     vec2 domainPosition=abs(aGrid)/uTerrainHalfSize;
-    float edgeCoordinate=max(domainPosition.x,domainPosition.y);
-    float broadEdgeNoise=(fbm(vec3(aGrid*.18,aSeed*.73))-.5)*.2;
+    // The simulation stays rectangular, while its visible ownership dissolves
+    // as a wide irregular oval well before the final rows and columns.
+    float edgeCoordinate=length(vec2(domainPosition.x,domainPosition.y*1.34));
+    float broadEdgeNoise=(fbm(vec3(aGrid*.18,aSeed*.73))-.5)*.14;
     float fineEdgeNoise=sin(aGrid.x*.71+aGrid.y*.43+aSeed*18.7)*.028;
     float distortedEdge=edgeCoordinate+broadEdgeNoise+fineEdgeNoise;
     float edge=1.-smoothstep(uEdgeFadeStart,uEdgeFadeStart+uEdgeFadeWidth,distortedEdge);
-    edge*=1.-smoothstep(.94,.995,edgeCoordinate);
-    float densityProbability=uPointDensity*pow(max(edge,0.),.58);
+    edge*=1.-smoothstep(.84,.96,edgeCoordinate);
+    float densityProbability=uPointDensity*pow(max(edge,0.),.68);
     float densityMask=step(hash11(aSeed*311.7),densityProbability);
 
-    float localProgress=smoothstep(aFormationDelay,aFormationDelay+.15,uTopologyProgress);
-    float eased=localProgress*localProgress*(3.-2.*localProgress);
-    float frontDistance=(uTopologyProgress-aFormationDelay)*13.;
-    float birthFront=exp(-frontDistance*frontDistance);
-    float frontPolarity=mix(-1.,1.,step(.5,noise3(vec3(aGrid*.24,aSeed*4.1))));
-    float shockHeight=birthFront*(.62+.5*hash11(aSeed*53.9))*frontPolarity*uAmplitude;
+    float localProgress=smoothstep(aFormationDelay-.025,aFormationDelay+.055,uTopologyProgress);
+    float frontDistance=(uTopologyProgress-aFormationDelay)/.065;
+    float frontBand=exp(-frontDistance*frontDistance);
+    float frontField=noise3(vec3(aGrid*.19,3.7));
+    float transitionFormationImpulse=frontBand*(.58+.3*frontField)
+      *uAmplitude*abs(uFormationDirection);
     vec2 sampleJitter=vec2(hash11(aSeed*29.7)-.5,hash11(aSeed*41.3)-.5)*.044;
-    vec3 target=vec3(aGrid.x+sampleJitter.x,h+shockHeight,aGrid.y+sampleJitter.y);
-    vec3 source=uSourcePosition+vec3(
-      hash11(aSeed*71.3)-.5,hash11(aSeed*127.1)-.5,hash11(aSeed*193.7)-.5
-    )*.045;
-    vec2 curvedPath=vec2(
-      noise3(vec3(aGrid*.21,aSeed*3.7))-.5,
-      noise3(vec3(aGrid.yx*.19,aSeed*5.3))-.5
-    )*sin(eased*3.14159265)*(.28+length(aGrid/uTerrainHalfSize)*.34);
-    vec3 p=mix(source,target,eased);
-    p.xz+=curvedPath;
-    p.y+=sin(eased*3.14159265)*(hash11(aSeed*83.1)-.35)*.18;
+    // Persistent samples never leave their logical field coordinates. The
+    // expanding/collapsing front transfers visibility, height and light only.
+    vec3 p=vec3(aGrid.x+sampleJitter.x,h+transitionFormationImpulse,aGrid.y+sampleJitter.y);
     vec4 mv=modelViewMatrix*vec4(p,1.);
     gl_Position=projectionMatrix*mv;
     vActivity=activity;vViewDepth=-mv.z;
@@ -583,9 +625,15 @@ export const terrainVertexShader=/* glsl */`
     vec3 vermilion=vec3(.72,.14,.075);
     vec3 color=mix(graphite,ivory,information*(.22+.34*heightLight));
     color=mix(color,amber,warmSignal*.58);color=mix(color,vermilion,redSignal);
+    float transitionWarmRegion=smoothstep(.3,.78,frontField+information*.16);
+    vec3 transitionWarmColor=mix(graphite,amber,.22+.4*transitionWarmRegion);
+    float transitionWarmInfluence=uTransitionWarm*frontBand*(.58+.42*transitionWarmRegion);
+    color=mix(color,transitionWarmColor,transitionWarmInfluence*.78);
     float valleyAo=mix(1.,.52,(1.-smoothstep(-.62,.05,h))*uAoStrength);
-    vColor=color*valleyAo*uEmission;
-    vBrightness=clamp(information*.48+warmSignal*.68+redSignal,0.,1.);
+    float edgeEnergy=smoothstep(0.,.7,edge);
+    vColor=color*valleyAo*uEmission*mix(.08,1.,edgeEnergy);
+    vBrightness=clamp((information*.48+warmSignal*.68+redSignal
+      +frontBand*abs(uFormationDirection)*.62)*edgeEnergy,0.,1.);
     float distanceFade=exp(-max(0.,vViewDepth-5.2)*uFogAttenuation);
     float farDensity=mix(1.,.38,smoothstep(5.8,11.5,vViewDepth));
     float formed=smoothstep(.015,.16,localProgress);

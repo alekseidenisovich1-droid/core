@@ -23,23 +23,24 @@ type Uniforms={
   uMissingData:{value:number};uGradientDamage:{value:number};uGeometryDamage:{value:number};
   uDepthFade:{value:number};
   uTerrainMorph:{value:number};
+  uRibbonAbsorption:{value:number};uRibbonAbsorptionAnchor:{value:number};
   uReliefActivity:{value:number};uWorkRelief:{value:number};uReliefRatio:{value:number};
 };
 type ParticleUniforms={
   uTime:{value:number};uIntensity:{value:number};uTear:{value:number};
   uCollapse:{value:number};uEject:{value:number};uContainment:{value:number};
-  uErrorSeed:{value:number};uPixelRatio:{value:number};
+  uErrorSeed:{value:number};uPixelRatio:{value:number};uTransitionWarm:{value:number};
 };
 type ContainmentUniforms={
   uTime:{value:number};uIntensity:{value:number};uSeed:{value:number};uLayer:{value:number};
   uLiving:{value:number};uMatterRemaining:{value:number};uConversion:{value:number};
   uCompression:{value:number};uSeedMorph:{value:number};uSeedCenter:{value:THREE.Vector3};
-  uTerrainMorph:{value:number};
+  uTerrainMorph:{value:number};uFillProgress:{value:number};uTerrainWarm:{value:number};
 };
 type CoreChaosUniforms={
   uTime:{value:number};uIntensity:{value:number};uVisibility:{value:number};uPixelRatio:{value:number};
   uCompression:{value:number};uSeedMorph:{value:number};uSeedCenter:{value:THREE.Vector3};
-  uTerrainMorph:{value:number};
+  uTerrainMorph:{value:number};uFillProgress:{value:number};uTransitionWarm:{value:number};
 };
 type Ribbon={
   group:THREE.Group;mesh:THREE.Mesh;surface:THREE.Mesh;uniforms:Uniforms;baseRotation:THREE.Euler;
@@ -75,7 +76,6 @@ type TerrainMatter={
   uniforms:Record<string,THREE.IUniform>;
   parameterUniforms:Record<TerrainParameterKey,{value:number}>;
 };
-
 const TERRAIN_DEFAULTS:TerrainParameters={
   amplitude:.8,macroFrequency:.24,macroSpeed:.1,mediumStrength:.23,mediumFrequency:1.08,
   waveDirectionCount:9,localEventFrequency:1.25,localEventRadius:1.2,localEventStrength:.64,
@@ -99,7 +99,7 @@ export type CubeTransitionPhase='inactive'|'convergeToError'|'kernelHold'|'morph
   |'seedOnly'|'expand'|'idle'|'collapseCube'|'reverseSeedOnly'|'seedToKernel'
   |'reverseKernelHold'|'releaseRibbons';
 export type TerrainTransitionPhase='inactive'|'convergeSource'|'sourceHold'
-  |'releasePoints'|'propagate'|'idle'|'collapsePoints'|'releaseTarget';
+  |'releasePoints'|'propagate'|'idle'|'collapsePoints'|'coreToChaos'|'releaseTarget';
 export type VisualEntityKey='ribbons'|'kernel'|'chaos'|'seedCube'|'cubeCells'|'cubeLight';
 type VisualOwnership=Record<VisualEntityKey,boolean>;
 
@@ -127,6 +127,7 @@ function makeMaterial(offset:number,grid:THREE.Vector2,side:THREE.Side,mobius:nu
     uGeometryDamage:{value:0},
     uDepthFade:{value:CONFIG.LIGHTING.depthFadeStrength},
     uTerrainMorph:{value:0},
+    uRibbonAbsorption:{value:0},uRibbonAbsorptionAnchor:{value:offset},
     uReliefActivity:{value:1},uWorkRelief:{value:0},
     uReliefRatio:{value:CONFIG.EXPERIMENTS.ribbonReliefRadiusRatio},
   };
@@ -231,12 +232,18 @@ export class CoreVisual{
   private cubeScale=new THREE.Vector3();
   private cubeAxis=new THREE.Vector3();
   private cubeRotation=new THREE.Quaternion();
+  private ribbonTargetQuaternion=new THREE.Quaternion();
   private cameraTarget=new THREE.Vector3();
   private terrainMatter:TerrainMatter;
   private terrainPresence=0;
   private terrainTransition=0;
   private terrainConvergence=0;
   private terrainSourceConsumption=0;
+  private chaosFillProgress=1;
+  private chaosVisualPresence=1;
+  private terrainChaosPaletteProgress=0;
+  private terrainChaosStartScale=STATE_TUNING.work.coreScale;
+  private terrainDestination:VisualState|null=null;
   private terrainPhase:TerrainTransitionPhase='inactive';
   private terrainEntrySource:'core'|'cube'|null=null;
   private terrainPhaseElapsed=0;
@@ -248,6 +255,7 @@ export class CoreVisual{
   private cubeSeedComplete=false;
   private cubePhase:CubeTransitionPhase='inactive';
   private cubeReverseActive=false;
+  private cubeTerrainHandoff=false;
   private frozenCubeRotation=new THREE.Euler();
   private cubeTransitionTimeScale:number=CONFIG.EXPERIMENTS.cubeTransitionTimeScale;
   private cubeAmberBrightness=1;
@@ -268,6 +276,7 @@ export class CoreVisual{
   private coreChaosTime=0;
   private coreChaosSpeed=1/3;
   private chaosLayerTimes:[number,number]=[0,2.7];
+  private chaosLayerTimeAdvancing=true;
   private chaosSpeedControl:number=CONFIG.EXPERIMENTS.chaosSpeedDefault;
   private livingChaosEnabled=true;
   private livingChaosMix=1;
@@ -279,9 +288,11 @@ export class CoreVisual{
   private coreDigitPhase=.3;
   private coreRotation=0;
   private containmentLatched=false;
-  private frozenCoreRotation=new THREE.Euler();
-  private frozenRootRotation=new THREE.Euler();
   private frozenRootPosition=new THREE.Vector3();
+  private topologyRotationLocked=false;
+  private frozenTopologyRootQuaternion=new THREE.Quaternion();
+  private frozenTopologyCoreQuaternion=new THREE.Quaternion();
+  private frozenTopologyRibbonQuaternions:THREE.Quaternion[]=[];
   private errorDirector=new ErrorDirector();
   private criticalDirector=new CriticalErrorDirector();
   private errorSignals:ErrorSignals={
@@ -344,6 +355,9 @@ export class CoreVisual{
     this.coreChaosUniforms=containment.particleUniforms;
     this.root.add(this.containmentChaos);
     for(let i=0;i<3;i++)this.ribbons.push(this.createRibbon(i));
+    this.frozenTopologyRibbonQuaternions=this.ribbons.map(
+      ribbon=>ribbon.group.quaternion.clone(),
+    );
     this.cubeMatter=this.createCubeMatter();
     this.root.add(this.cubeMatter.group);
     this.terrainMatter=this.createTerrainMatter();
@@ -358,7 +372,7 @@ export class CoreVisual{
         uTime:{value:0},uIntensity:{value:0},uSeed:{value:seed},uLayer:{value:layer},uLiving:{value:1},
         uMatterRemaining:{value:1},uConversion:{value:0},
         uCompression:{value:0},uSeedMorph:{value:0},uSeedCenter:{value:new THREE.Vector3()},
-        uTerrainMorph:{value:0},
+        uTerrainMorph:{value:0},uFillProgress:{value:1},uTerrainWarm:{value:0},
       };
       const material=new THREE.ShaderMaterial({
         uniforms,vertexShader:containmentVertexShader,fragmentShader:containmentFragmentShader,
@@ -391,7 +405,7 @@ export class CoreVisual{
       uTime:{value:0},uIntensity:{value:0},uVisibility:{value:0},
       uPixelRatio:{value:Math.min(devicePixelRatio,2)},
       uCompression:{value:0},uSeedMorph:{value:0},uSeedCenter:{value:new THREE.Vector3()},
-      uTerrainMorph:{value:0},
+      uTerrainMorph:{value:0},uFillProgress:{value:1},uTransitionWarm:{value:0},
     };
     const particleMaterial=new THREE.ShaderMaterial({
       uniforms:particleUniforms,vertexShader:coreChaosVertexShader,fragmentShader:particleFragmentShader,
@@ -404,23 +418,50 @@ export class CoreVisual{
 
   setSnapshot(snapshot:Readonly<Snapshot>){
     const next=getVisualState(snapshot.state);
+    // While TERRAIN collapses, the requested destination is remembered but is
+    // not allowed to own tuning, directors or renderers yet. The active visual
+    // state changes only after the inward front has delivered compact Chaos.
+    if(this.state==='terrain'&&next!=='terrain'){
+      this.terrainDestination=next;
+      this.cubeTerrainHandoff=false;
+      if(this.terrainPhase!=='collapsePoints'){
+        this.terrainPhase='collapsePoints';
+        this.terrainPhaseElapsed=0;
+        this.terrainEntrySource='core';
+      }
+      this.hovered=snapshot.hovered;
+      return;
+    }
+    // A rapid return to 7 cancels an unfinished exit from its conserved
+    // progress. No destination topology has been released at this point.
+    if(this.state==='terrain'&&next==='terrain'&&this.terrainDestination){
+      this.terrainDestination=null;
+      this.terrainPhase=this.terrainTransition<.68?'releasePoints':'propagate';
+      this.terrainEntrySource='core';
+      this.terrainPhaseElapsed=0;
+      this.hovered=snapshot.hovered;
+      return;
+    }
     if(next!==this.state){
       if(next==='terrain'&&this.state!=='terrain'){
+        this.lockTopologyRotation();
+        this.terrainChaosStartScale=Math.max(.08,this.containmentChaos.scale.x);
+        const wasContainedDestinationRelease=this.terrainPhase==='releaseTarget'
+          &&this.terrainConvergence>.85;
+        this.terrainDestination=null;
         this.terrainEntrySource=this.state==='cube'?'cube':'core';
         this.terrainPhase='convergeSource';
         this.terrainPhaseElapsed=0;
         this.terrainTransition=0;
         this.terrainSourceConsumption=0;
-        const alreadyContained=this.state==='error'&&this.errorSignals.containment>.85;
+        this.chaosFillProgress=0;
+        const alreadyContained=(this.state==='error'&&this.errorSignals.containment>.85)
+          ||wasContainedDestinationRelease;
         this.terrainConvergence=alreadyContained?1:0;
-      }else if(this.state==='terrain'&&next!=='terrain'){
-        // Point coordinates remain persistent and simply run their formation
-        // mapping backwards into the same compact source.
-        this.terrainPhase='collapsePoints';
-        this.terrainPhaseElapsed=0;
-        this.terrainEntrySource='core';
       }
       if(next==='cube'&&this.state!=='cube'){
+        this.lockTopologyRotation();
+        this.cubeTerrainHandoff=false;
         if(this.cubeReverseActive){
           // A re-entry during the reverse transition resumes from the exact
           // conserved topology instead of restarting or popping.
@@ -431,6 +472,7 @@ export class CoreVisual{
             ?CONFIG.EXPERIMENTS.cubeCoreGatherSeconds/CONFIG.EXPERIMENTS.cubeTransitionSeconds:0;
         }
       }else if(this.state==='cube'&&next!=='cube'){
+        this.cubeTerrainHandoff=false;
         this.cubeReverseActive=this.cubeTransition>0;
         this.frozenCubeRotation.copy(this.cubeMatter.group.rotation);
       }
@@ -440,6 +482,16 @@ export class CoreVisual{
       this.criticalDirector.setActive(criticalActive);
     }
     this.state=next;this.hovered=snapshot.hovered;
+  }
+
+  private lockTopologyRotation(){
+    if(this.topologyRotationLocked)return;
+    this.topologyRotationLocked=true;
+    this.frozenTopologyRootQuaternion.copy(this.root.quaternion);
+    this.frozenTopologyCoreQuaternion.copy(this.core.quaternion);
+    this.ribbons.forEach((ribbon,index)=>{
+      this.frozenTopologyRibbonQuaternions[index].copy(ribbon.group.quaternion);
+    });
   }
 
   clearCriticalDamagePreview(){
@@ -482,6 +534,54 @@ export class CoreVisual{
   }
   getCubeTransitionPhase(){return this.cubePhase;}
   getTerrainTransitionPhase(){return this.terrainPhase;}
+  getTransitionDebug():Readonly<Record<string,unknown>>{
+    const topologyOwner={
+      convergeSource:'ribbons + Kernel + Chaos',sourceHold:'Chaos',
+      releasePoints:'Chaos + Terrain front',propagate:'Chaos + Terrain',idle:'Terrain',
+      collapsePoints:'inward Terrain front + warm compact Chaos',
+      coreToChaos:'warm compact Chaos',releaseTarget:'Mini Chaos + destination',
+      inactive:this.state,
+    }[this.terrainPhase];
+    const pixelContributors:string[]=[];
+    if(this.terrainMatter.group.visible&&this.terrainPresence>.002)pixelContributors.push('Terrain points');
+    if(this.ribbons.some(ribbon=>ribbon.group.visible&&ribbon.uniforms.uVisibility.value>.01)){
+      pixelContributors.push('Möbius ribbons');
+    }
+    if(this.core.visible&&this.coreUniforms.uVisibility.value>.01)pixelContributors.push('Kernel');
+    if(this.containmentChaos.visible&&this.chaosVisualPresence>.01){
+      pixelContributors.push('Chaos shells');
+    }
+    if(this.containmentChaos.visible&&this.coreChaosUniforms.uVisibility.value>.01){
+      pixelContributors.push('Disco Ball digits');
+    }
+    if(this.cubeMatter.group.visible&&(this.cubeMatter.cells.visible||this.cubeMatter.seedCell.visible)){
+      pixelContributors.push(this.cubeMatter.seedCell.visible?'Seed Cube':'Cube cells');
+    }
+    const terrainIdleUnexpected=this.terrainPhase==='idle'
+      ?pixelContributors.filter(name=>name!=='Terrain points'):[];
+    return{
+      activeVisualState:this.state,
+      transitionPhase:this.terrainPhase,
+      topologyOwner,
+      requestedDestination:this.terrainDestination,
+      chaosFillProgress:this.chaosFillProgress,
+      chaosVisualPresence:this.chaosVisualPresence,
+      chaosLayerTimeAdvancing:this.chaosLayerTimeAdvancing,
+      chaosShellTime:[...this.chaosLayerTimes],
+      chaosParticleTime:this.coreChaosTime,
+      topologyRotationLocked:this.topologyRotationLocked,
+      ribbonContainmentProgress:this.terrainConvergence,
+      ribbonVisibility:this.ribbons.map(ribbon=>ribbon.uniforms.uVisibility.value),
+      terrainFormationProgress:this.terrainTransition,
+      terrainFrontProgress:this.terrainTransition,
+      terrainVisible:this.terrainMatter.group.visible,
+      terrainPresence:this.terrainPresence,
+      compactChaosPaletteProgress:this.terrainChaosPaletteProgress,
+      pixelContributors,
+      terrainIdleUnexpected,
+      localEventFrequency:this.terrainMatter.parameterUniforms.localEventFrequency.value,
+    };
+  }
 
   setCubeAmberBrightness(value:number){
     this.cubeAmberBrightness=THREE.MathUtils.clamp(value,0,2);
@@ -499,13 +599,13 @@ export class CoreVisual{
       return{ribbons:true,kernel:true,chaos:true,seedCube:false,cubeCells:false,cubeLight:false};
     }
     if(this.cubePhase==='kernelHold'){
-      return{ribbons:false,kernel:true,chaos:true,seedCube:false,cubeCells:false,cubeLight:false};
+      return{ribbons:false,kernel:false,chaos:true,seedCube:false,cubeCells:false,cubeLight:false};
     }
     if(this.cubePhase==='morphToSeed'){
       // The contained old matter owns this phase. The actual seed is prepared
       // offscreen and takes ownership only after the topology morph completes,
       // preventing a spherical shell and square from being visible together.
-      return{ribbons:false,kernel:true,chaos:true,seedCube:false,cubeCells:false,cubeLight:true};
+      return{ribbons:false,kernel:false,chaos:true,seedCube:false,cubeCells:false,cubeLight:true};
     }
     if(this.cubePhase==='seedOnly'){
       return{ribbons:false,kernel:false,chaos:false,seedCube:true,cubeCells:false,cubeLight:true};
@@ -520,7 +620,7 @@ export class CoreVisual{
       return{ribbons:false,kernel:false,chaos:true,seedCube:false,cubeCells:false,cubeLight:false};
     }
     if(this.cubePhase==='reverseKernelHold'){
-      return{ribbons:false,kernel:true,chaos:true,seedCube:false,cubeCells:false,cubeLight:false};
+      return{ribbons:false,kernel:false,chaos:true,seedCube:false,cubeCells:false,cubeLight:false};
     }
     if(this.cubePhase==='releaseRibbons'){
       return{ribbons:true,kernel:true,chaos:true,seedCube:false,cubeCells:false,cubeLight:false};
@@ -530,7 +630,7 @@ export class CoreVisual{
 
   private applyVisualOwnership(){
     const owned=this.getVisualOwnership(),debug=this.visualEntityDebug;
-    const terrainExclusive=this.state==='terrain'&&this.terrainSourceConsumption>.995;
+    const terrainExclusive=this.state==='terrain'&&this.terrainPhase==='idle';
     const showRibbons=owned.ribbons&&debug.ribbons&&!terrainExclusive;
     this.ribbons.forEach(ribbon=>{
       ribbon.group.visible=showRibbons;
@@ -541,17 +641,31 @@ export class CoreVisual{
     const terrainCubeSeed=this.state==='terrain'&&this.terrainEntrySource==='cube'
       &&(this.terrainPhase==='sourceHold'||this.terrainPhase==='releasePoints'
         ||this.terrainPhase==='propagate')&&this.terrainSourceConsumption<.995;
-    const showSeed=(owned.seedCube||terrainCubeSeed)&&debug.seedCube;
-    const showCells=owned.cubeCells&&debug.cubeCells;
+    const showSeed=(owned.seedCube||terrainCubeSeed)&&debug.seedCube&&!terrainExclusive;
+    const showCells=owned.cubeCells&&debug.cubeCells&&!terrainExclusive;
+    const seedWarmup=this.state==='terrain'&&this.terrainEntrySource==='cube'
+      ?this.terrainPhase==='sourceHold'
+        ?THREE.MathUtils.smoothstep(
+          this.terrainPhaseElapsed,0,CONFIG.EXPERIMENTS.terrainSourceHoldSeconds,
+        )
+        :this.terrainPhase==='releasePoints'||this.terrainPhase==='propagate'
+          ?1-this.terrainSourceConsumption:0
+      :0;
     const terrainSeedScale=terrainCubeSeed
       ?1-THREE.MathUtils.smoothstep(this.terrainSourceConsumption,.04,.94):1;
-    this.cubeMatter.group.scale.setScalar(terrainSeedScale);
-    this.cubeMatter.group.visible=showSeed||showCells||(owned.cubeLight&&debug.cubeLight);
+    const seedTension=1+seedWarmup*Math.sin(this.terrainPhaseElapsed*34.)*.012;
+    this.cubeMatter.group.scale.setScalar(terrainSeedScale*seedTension);
+    this.cubeMatter.group.visible=!terrainExclusive
+      &&(showSeed||showCells||(owned.cubeLight&&debug.cubeLight));
     this.cubeMatter.cells.visible=showCells;
     this.cubeMatter.seedCell.visible=showSeed;
     this.cubeMatter.glyphs.visible=showSeed||showCells;
-    this.cubeMatter.centerLight.visible=owned.cubeLight&&debug.cubeLight;
-    this.cubeMatter.violetLight.visible=owned.cubeLight&&debug.cubeLight;
+    if(seedWarmup>0){
+      this.cubeMatter.seedMaterial.emissiveIntensity=.17+seedWarmup*.28;
+      this.cubeMatter.centerLight.intensity=(.35+seedWarmup*.82)*this.cubeAmberBrightness;
+    }
+    this.cubeMatter.centerLight.visible=owned.cubeLight&&debug.cubeLight&&!terrainExclusive;
+    this.cubeMatter.violetLight.visible=owned.cubeLight&&debug.cubeLight&&!terrainExclusive;
   }
 
   private createEjectionParticles(radius:number,halfWidth:number,index:number){
@@ -568,11 +682,11 @@ export class CoreVisual{
     const geometry=new THREE.BufferGeometry();
     geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));
     geometry.setAttribute('aSeed',new THREE.BufferAttribute(seeds,1));
-    const particleUniforms:ParticleUniforms={
-      uTime:{value:0},uIntensity:{value:0},uTear:{value:0},uCollapse:{value:0},
-      uEject:{value:0},uContainment:{value:0},uErrorSeed:{value:0},
-      uPixelRatio:{value:Math.min(devicePixelRatio,2)},
-    };
+      const particleUniforms:ParticleUniforms={
+        uTime:{value:0},uIntensity:{value:0},uTear:{value:0},uCollapse:{value:0},
+        uEject:{value:0},uContainment:{value:0},uErrorSeed:{value:0},
+        uPixelRatio:{value:Math.min(devicePixelRatio,2)},uTransitionWarm:{value:0},
+      };
     const material=new THREE.ShaderMaterial({
       uniforms:particleUniforms,vertexShader:particleVertexShader,fragmentShader:particleFragmentShader,
       transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
@@ -596,14 +710,18 @@ export class CoreVisual{
       const px=(x/(columns-1)-.5)*CONFIG.EXPERIMENTS.terrainWidth;
       const pz=(z/(rows-1)-.5)*CONFIG.EXPERIMENTS.terrainDepth;
       const seed=Math.abs(Math.sin((point+1)*91.731+x*17.13+z*7.91)*43758.5453)%1;
-      const ellipticalDistance=Math.hypot(px/(CONFIG.EXPERIMENTS.terrainWidth*.5),
-        pz/(CONFIG.EXPERIMENTS.terrainDepth*.5));
+      const normalizedX=px/(CONFIG.EXPERIMENTS.terrainWidth*.5);
+      const normalizedZ=pz/(CONFIG.EXPERIMENTS.terrainDepth*.5);
+      const fieldDistance=Math.hypot(normalizedX,normalizedZ*1.34);
+      const arrivalDistortion=Math.sin(px*.31+pz*.19)*.034
+        +Math.sin(px*.13-pz*.37+1.7)*.022;
       positions[point*3]=px;positions[point*3+2]=pz;
       grid[point*2]=px;grid[point*2+1]=pz;seeds[point]=seed;
-      // Stable, slightly anisotropic arrival times make the formation front
-      // broad and irregular without turning persistent samples into particles.
+      // Stable low-frequency arrival distortion keeps one coherent anisotropic
+      // ownership front without turning persistent samples into projectiles.
       formationDelays[point]=THREE.MathUtils.clamp(
-        ellipticalDistance*.72+(seed-.5)*.11+px/CONFIG.EXPERIMENTS.terrainWidth*.055,0,.9,
+        fieldDistance*.82+arrivalDistortion+(seed-.5)*.024
+          +px/CONFIG.EXPERIMENTS.terrainWidth*.035,0,.9,
       );
     }
     geometry.setAttribute('position',new THREE.BufferAttribute(positions,3));
@@ -617,11 +735,11 @@ export class CoreVisual{
     ) as Record<TerrainParameterKey,{value:number}>;
     const uniforms:Record<string,THREE.IUniform>={
       uTime:{value:0},uPresence:{value:0},uTopologyProgress:{value:0},
+      uFormationDirection:{value:0},uTransitionWarm:{value:0},
       uPixelRatio:{value:this.renderer.getPixelRatio()},
       uTerrainHalfSize:{value:new THREE.Vector2(
         CONFIG.EXPERIMENTS.terrainWidth*.5,CONFIG.EXPERIMENTS.terrainDepth*.5,
       )},
-      uSourcePosition:{value:new THREE.Vector3(-.08,.28,-.45)},
       uAmplitude:parameterUniforms.amplitude,uMacroFrequency:parameterUniforms.macroFrequency,
       uMacroSpeed:parameterUniforms.macroSpeed,uMediumStrength:parameterUniforms.mediumStrength,
       uMediumFrequency:parameterUniforms.mediumFrequency,uWaveDirectionCount:parameterUniforms.waveDirectionCount,
@@ -783,6 +901,7 @@ export class CoreVisual{
     const expansion=THREE.MathUtils.smoothstep(
       elapsed,seedOnlyEnd,CONFIG.EXPERIMENTS.cubeTransitionSeconds,
     );
+    if(this.cubeTerrainHandoff&&seedMorph>=.999)this.cubeTerrainHandoff=false;
     if(this.cubeReverseActive){
       this.cubePhase=elapsed>seedOnlyEnd?'collapseCube'
         :elapsed>seedEnd?'reverseSeedOnly'
@@ -882,14 +1001,11 @@ export class CoreVisual{
       // Preserve the cube's current natural orientation while its layers are
       // collected. This avoids introducing a transition-only unwind.
       cube.group.rotation.copy(this.frozenCubeRotation);
-    }else{
-      const idleRotation=THREE.MathUtils.smoothstep(expansion,.18,.82);
-      // Rotation is integrated from dt. Never multiply absolute time or an
-      // accumulated angle by transition progress: doing so turns an ordinary
-      // reveal into an arbitrarily strong spin after the app has run awhile.
-      cube.group.rotation.y+=dt*.075*idleRotation;
-      cube.group.rotation.x=damp(cube.group.rotation.x,
-        Math.sin(time*.19)*.08*idleRotation,dt,2.8);
+    }else if(this.cubePhase==='idle'){
+      // The final cube may rotate only after topology ownership is complete.
+      // Expansion itself is translation/scale only and never introduces spin.
+      cube.group.rotation.y+=dt*.075;
+      cube.group.rotation.x=damp(cube.group.rotation.x,Math.sin(time*.19)*.08,dt,2.8);
       cube.group.rotation.z=damp(cube.group.rotation.z,0,dt,2.8);
     }
   }
@@ -903,7 +1019,72 @@ export class CoreVisual{
       +CONFIG.EXPERIMENTS.cubeCoreHoldSeconds+CONFIG.EXPERIMENTS.cubeSeedMorphSeconds
       +CONFIG.EXPERIMENTS.cubeSeedOnlySeconds)/CONFIG.EXPERIMENTS.cubeTransitionSeconds;
 
-    if(this.state==='terrain'){
+    this.terrainChaosPaletteProgress=0;
+
+    if(this.terrainPhase==='collapsePoints'){
+      this.terrainTransition=Math.max(0,
+        this.terrainTransition-scaledDt/propagationDuration,
+      );
+      this.terrainConvergence=1;
+      this.terrainSourceConsumption=THREE.MathUtils.smoothstep(
+        this.terrainTransition,.015,.27,
+      );
+      // The inward front condenses directly into the same two-shell CHAOS.
+      // A separate point ball read as an unexplained yellow object, so it no
+      // longer receives visual ownership during the handoff.
+      const compactChaosFill=1-THREE.MathUtils.smoothstep(
+        this.terrainTransition,.15,.82,
+      );
+      this.chaosFillProgress=compactChaosFill;
+      this.chaosVisualPresence=compactChaosFill;
+      if(this.terrainTransition<=0){
+        this.terrainTransition=0;this.terrainSourceConsumption=0;
+        this.chaosFillProgress=1;this.chaosVisualPresence=1;
+        this.terrainPhase='coreToChaos';this.terrainPhaseElapsed=0;
+      }
+    }else if(this.terrainPhase==='coreToChaos'){
+      this.terrainConvergence=1;
+      this.terrainPhaseElapsed+=scaledDt;
+      this.terrainChaosPaletteProgress=THREE.MathUtils.smoothstep(
+        this.terrainPhaseElapsed,0,CONFIG.EXPERIMENTS.terrainCoreMorphSeconds,
+      );
+      this.chaosFillProgress=1;
+      this.chaosVisualPresence=1;
+      if(this.terrainPhaseElapsed>=CONFIG.EXPERIMENTS.terrainCoreMorphSeconds){
+        const destination=this.terrainDestination;
+        this.terrainChaosPaletteProgress=1;
+        this.chaosFillProgress=1;this.chaosVisualPresence=1;
+        if(destination==='cube'){
+          // The cube-sized warm CHAOS turns directly into the accepted seed.
+          // Starting at morphToSeed avoids an unrelated Kernel/disco sphere.
+          this.state='cube';
+          this.cubeTerrainHandoff=true;
+          this.cubeTransition=(CONFIG.EXPERIMENTS.cubeCoreGatherSeconds
+            +CONFIG.EXPERIMENTS.cubeCoreHoldSeconds)
+            /CONFIG.EXPERIMENTS.cubeTransitionSeconds;
+          this.terrainConvergence=0;this.terrainPhase='inactive';
+          this.terrainEntrySource=null;this.terrainDestination=null;
+        }else if(destination){
+          this.state=destination;
+          this.terrainDestination=null;
+          this.errorDirector.setActive(destination==='error');
+          const criticalActive=destination==='critical'||destination==='critical2';
+          this.criticalDirector.setContainmentEnding(destination==='critical');
+          this.criticalDirector.setActive(criticalActive);
+          this.terrainPhase='releaseTarget';this.terrainPhaseElapsed=0;
+        }
+      }
+    }else if(this.terrainPhase==='releaseTarget'){
+      this.chaosFillProgress=1;this.chaosVisualPresence=1;
+      this.terrainPhaseElapsed+=scaledDt;
+      this.terrainConvergence=1-THREE.MathUtils.smoothstep(
+        this.terrainPhaseElapsed,0,CONFIG.EXPERIMENTS.terrainTargetReleaseSeconds,
+      );
+      if(this.terrainConvergence<=0){
+        this.terrainConvergence=0;this.terrainPhase='inactive';
+        this.terrainEntrySource=null;
+      }
+    }else if(this.state==='terrain'){
       if(this.terrainPhase==='convergeSource'){
         if(this.terrainEntrySource==='cube'){
           // updateCubeMatter owns this motion. Terrain only observes when the
@@ -922,8 +1103,21 @@ export class CoreVisual{
             this.terrainPhase='sourceHold';this.terrainPhaseElapsed=0;
           }
         }
+        if(this.terrainEntrySource==='cube'){
+          this.chaosFillProgress=0;this.chaosVisualPresence=0;
+        }else{
+          this.chaosFillProgress=THREE.MathUtils.smoothstep(
+            this.terrainConvergence,.34,.96,
+          );
+          // Existing native Chaos remains readable while ribbon matter enters
+          // it spatially; the same two shells then become the Mini Chaos owner.
+          this.chaosVisualPresence=Math.max(1-this.terrainConvergence,this.chaosFillProgress);
+        }
       }else if(this.terrainPhase==='sourceHold'){
         this.terrainConvergence=1;
+        const usesMiniChaos=this.terrainEntrySource!=='cube';
+        this.chaosFillProgress=usesMiniChaos?1:0;
+        this.chaosVisualPresence=usesMiniChaos?1:0;
         this.terrainPhaseElapsed+=scaledDt;
         if(this.terrainPhaseElapsed>=holdDuration){
           this.terrainPhase='releasePoints';this.terrainPhaseElapsed=0;
@@ -936,50 +1130,28 @@ export class CoreVisual{
         this.terrainSourceConsumption=THREE.MathUtils.smoothstep(
           this.terrainTransition,.015,.27,
         );
+        const usesMiniChaos=this.terrainEntrySource!=='cube';
+        this.chaosFillProgress=usesMiniChaos
+          ?1-THREE.MathUtils.smoothstep(this.terrainTransition,.04,.96):0;
+        this.chaosVisualPresence=usesMiniChaos?this.chaosFillProgress:0;
         this.terrainPhase=this.terrainTransition<.68?'releasePoints':'propagate';
         if(this.terrainEntrySource==='cube'&&this.terrainSourceConsumption>.97){
           // The seed has been consumed by point matter. Ending the reverse
           // controller here prevents it from continuing on to Kernel.
-          this.cubeReverseActive=false;this.cubeTransition=0;
+          this.cubeReverseActive=false;this.cubeTransition=0;this.cubePhase='inactive';
         }
         if(this.terrainTransition>=1){
           this.terrainTransition=1;this.terrainSourceConsumption=1;
+          this.chaosFillProgress=0;this.chaosVisualPresence=0;
+          this.terrainChaosPaletteProgress=0;
+          this.cubeReverseActive=false;this.cubeTransition=0;this.cubePhase='inactive';
           this.terrainPhase='idle';this.terrainEntrySource=null;
         }
       }else if(this.terrainPhase==='idle'){
         this.terrainTransition=1;this.terrainConvergence=1;
         this.terrainSourceConsumption=1;
-      }
-    }else if(this.terrainPhase==='collapsePoints'){
-      this.terrainTransition=Math.max(0,
-        this.terrainTransition-scaledDt/propagationDuration,
-      );
-      this.terrainConvergence=1;
-      this.terrainSourceConsumption=THREE.MathUtils.smoothstep(
-        this.terrainTransition,.015,.27,
-      );
-      if(this.terrainTransition<=0){
-        this.terrainTransition=0;this.terrainSourceConsumption=0;
-        if(this.state==='cube'){
-          // TERRAIN has already delivered the canonical compact source, so a
-          // following CUBE entry can begin at Kernel hold instead of releasing
-          // ribbons only to gather them a second time.
-          this.cubeTransition=CONFIG.EXPERIMENTS.cubeCoreGatherSeconds
-            /CONFIG.EXPERIMENTS.cubeTransitionSeconds;
-          this.terrainConvergence=0;this.terrainPhase='inactive';
-          this.terrainEntrySource=null;
-        }else{
-          this.terrainPhase='releaseTarget';this.terrainPhaseElapsed=0;
-        }
-      }
-    }else if(this.terrainPhase==='releaseTarget'){
-      this.terrainPhaseElapsed+=scaledDt;
-      this.terrainConvergence=1-THREE.MathUtils.smoothstep(
-        this.terrainPhaseElapsed,0,CONFIG.EXPERIMENTS.terrainTargetReleaseSeconds,
-      );
-      if(this.terrainConvergence<=0){
-        this.terrainConvergence=0;this.terrainPhase='inactive';
-        this.terrainEntrySource=null;
+        this.chaosFillProgress=0;this.chaosVisualPresence=0;
+        this.terrainChaosPaletteProgress=0;
       }
     }
 
@@ -987,6 +1159,11 @@ export class CoreVisual{
     this.terrainPresence=damp(this.terrainPresence,terrainTarget,dt,9.5);
     this.terrainMatter.uniforms.uPresence.value=this.terrainPresence;
     this.terrainMatter.uniforms.uTopologyProgress.value=this.terrainTransition;
+    this.terrainMatter.uniforms.uFormationDirection.value=this.terrainPhase==='releasePoints'
+      ||this.terrainPhase==='propagate'?1:this.terrainPhase==='collapsePoints'?-1:0;
+    this.terrainMatter.uniforms.uTransitionWarm.value=Math.abs(
+      this.terrainMatter.uniforms.uFormationDirection.value as number,
+    );
     this.terrainMatter.group.visible=this.terrainPresence>.002;
   }
 
@@ -1094,10 +1271,10 @@ export class CoreVisual{
     });
     this.ribbons.forEach(ribbon=>{
       ribbon.surface.position.copy(ribbon.mesh.position);
-      ribbon.surface.visible=ribbon.uniforms.uVisibility.value>.01&&this.cubeMatter.presence<.997;
+      ribbon.surface.visible=ribbon.uniforms.uVisibility.value>.01&&this.cubeMatter.presence<.997
+        &&ribbon.uniforms.uRibbonAbsorption.value<.995;
       const surfaceMaterial=ribbon.surface.material as THREE.MeshStandardMaterial;
-      surfaceMaterial.opacity=CONFIG.LIGHTING.surfaceOpacity*(1-this.cubeMatter.presence)
-        *(1-this.terrainSourceConsumption);
+      surfaceMaterial.opacity=CONFIG.LIGHTING.surfaceOpacity*(1-this.cubeMatter.presence);
       surfaceMaterial.emissiveIntensity=debug.emissive
         ?CONFIG.LIGHTING.ribbonEmission*(.62+this.current.energy*.28):0;
     });
@@ -1113,7 +1290,8 @@ export class CoreVisual{
     const base=ribbon.surfaceBasePositions,u=ribbon.uniforms;
     const phase=u.uWavePhase.value-u.uOffset.value*.7+u.uErrorJerk.value*.42;
     for(let i=0;i<positions.count;i++){
-      const p=i*3,theta=uvs.getX(i)*Math.PI*2,c=Math.cos(theta),s=Math.sin(theta);
+      const surfaceU=uvs.getX(i);
+      const p=i*3,theta=surfaceU*Math.PI*2,c=Math.cos(theta),s=Math.sin(theta);
       const wave=Math.sin(theta-phase)*.58+Math.sin(theta*2-phase*1.13)*.29+Math.sin(theta*4-phase*.91)*.13;
       const secondary=Math.sin(theta*2+u.uTime.value*.31+u.uOffset.value*5.3)*.44
         +Math.sin(theta*3-u.uTime.value*.19+u.uOffset.value*2.1)*.31;
@@ -1130,13 +1308,17 @@ export class CoreVisual{
       const hillB=Math.pow(.5+.5*Math.sin(theta*7+hillClock*.71+u.uOffset.value*13),3);
       const livingRelief=(hillA*.9-hillB*.3+Math.sin(theta*11-hillClock*1.17)*.08)
         *ribbon.radius*u.uReliefRatio.value*u.uReliefActivity.value*u.uWorkRelief.value;
-      positions.setXYZ(i,
-        ribbon.radius*c+x+c*radial+normals.getX(i)*livingRelief,
-        ribbon.radius*s+y+s*radial+normals.getY(i)*livingRelief,
-        z+u.uDeformation.value*Math.sin(theta*2-u.uTime.value*.21+u.uOffset.value*9.)*(.45+u.uEnergy.value*.85)
+      const arc=Math.abs((((surfaceU-u.uRibbonAbsorptionAnchor.value+.5)%1)+1)%1-.5)*2;
+      const front=u.uRibbonAbsorption.value*1.16-.08;
+      const absorption=u.uRibbonAbsorption.value<=.001?0
+        :1-THREE.MathUtils.smoothstep(arc,front-.105,front+.105);
+      const suctionScale=THREE.MathUtils.lerp(1,.055,absorption);
+      const displacedX=ribbon.radius*c+x+c*radial+normals.getX(i)*livingRelief;
+      const displacedY=ribbon.radius*s+y+s*radial+normals.getY(i)*livingRelief;
+      const displacedZ=z+u.uDeformation.value*Math.sin(theta*2-u.uTime.value*.21+u.uOffset.value*9.)*(.45+u.uEnergy.value*.85)
         +wave*u.uWaveAmplitude.value*Math.max(0,(u.uEnergy.value-.62)/.38)*1.35
-        +normals.getZ(i)*livingRelief,
-      );
+        +normals.getZ(i)*livingRelief;
+      positions.setXYZ(i,displacedX*suctionScale,displacedY*suctionScale,displacedZ*suctionScale);
     }
     positions.needsUpdate=true;
   }
@@ -1156,6 +1338,13 @@ export class CoreVisual{
     const cubeGatherEnd=CONFIG.EXPERIMENTS.cubeCoreGatherSeconds/CONFIG.EXPERIMENTS.cubeTransitionSeconds;
     const cubeGather=cubeTopologyActive
       ?THREE.MathUtils.smoothstep(this.cubeTransition,0,cubeGatherEnd):0;
+    // Cube topology may lock the root and Kernel, but the ribbons keep their
+    // own natural orbit while their visible length enters or leaves CHAOS.
+    // The quaternion captured below follows that trajectory, preventing the
+    // old release-end snap back to the orientation frozen at transition start.
+    const ribbonTopologyMotionAllowed=cubeTopologyActive&&(
+      this.cubePhase==='convergeToError'||this.cubePhase==='releaseRibbons'
+    );
     // The familiar chaotic core remains the material reservoir until the
     // growing cell field has claimed it; it is not faded out at state entry.
     const cubeChaosReservoir=cubeTopologyActive
@@ -1168,7 +1357,19 @@ export class CoreVisual{
     // Topology progress controls angular velocity, never the accumulated
     // angle. Entry therefore coasts to a stop; reverse exit resumes in the
     // same direction instead of rewinding or explosively catching up.
-    const chaosTopologyVelocity=cubeTopologyActive?1-this.cubeCompression:1;
+    // Orientation safety and internal Chaos life are separate concerns. A
+    // topology lock freezes root/Kernel/ribbon quaternions, but living Chaos
+    // must already be advancing when CALM/WORK/ERROR/CRITICAL owns it. CUBE
+    // compression remains the only transition that deliberately slows the
+    // shell clocks as their matter becomes a seed.
+    const finalStateNeedsLivingChaos=this.state==='calm'||this.state==='work'
+      ||this.state==='error'||this.state==='critical'||this.state==='critical2';
+    const terrainPhaseNeedsLivingChaos=this.terrainPhase!=='inactive'
+      &&this.terrainPhase!=='idle';
+    const allowChaosAnimation=finalStateNeedsLivingChaos||terrainPhaseNeedsLivingChaos;
+    const chaosTopologyVelocity=cubeTopologyActive
+      ?1-this.cubeCompression:(allowChaosAnimation?1:0);
+    this.chaosLayerTimeAdvancing=chaosTopologyVelocity>.0001;
     this.chaosLayerTimes[0]+=controlledChaosStep*.82*chaosTopologyVelocity;
     this.chaosLayerTimes[1]+=controlledChaosStep*1.19*chaosTopologyVelocity;
     this.errorStructure=damp(this.errorStructure,
@@ -1187,14 +1388,19 @@ export class CoreVisual{
     const containment=this.errorSignals.containment;
     // CUBE and TERRAIN share the same compact containment destination, while
     // retaining independent phase controllers after that canonical source.
-    const topologyContainment=Math.max(containment,cubeGather,this.terrainConvergence);
+    const legacyTopologyContainment=Math.max(containment,cubeGather);
+    const topologyContainment=Math.max(legacyTopologyContainment,this.terrainConvergence);
+    const terrainRibbonAbsorption=this.terrainPhase==='inactive'?0:this.terrainConvergence;
+    if(topologyContainment>.015&&!this.topologyRotationLocked){
+      this.lockTopologyRotation();
+    }else if(topologyContainment<.008&&this.topologyRotationLocked){
+      this.topologyRotationLocked=false;
+    }
     const rebuildingFromContainment=containment>.002&&(
       this.state==='calm'||this.state==='work'||this.state==='critical2'||critical.previewMode>0
     );
     if(containment>.015&&!this.containmentLatched){
       this.containmentLatched=true;
-      this.frozenCoreRotation.copy(this.core.rotation);
-      this.frozenRootRotation.copy(this.root.rotation);
       this.frozenRootPosition.copy(this.root.position);
     }else if(containment<.008&&this.containmentLatched){
       this.containmentLatched=false;
@@ -1203,7 +1409,9 @@ export class CoreVisual{
     this.organismWavePhase+=dt*this.current.waveSpeed*brokenTempo;
     this.coreGradientPhase+=dt*(this.current.gradientSpeed*(1-containment)+containment*.28);
     this.coreDigitPhase+=dt*(this.current.rewriteSpeed*(1-containment)+containment*4.2);
-    this.coreRotation+=dt*(.035+this.current.orbitSpeed*.07)*(1-containment);
+    if(!this.topologyRotationLocked){
+      this.coreRotation+=dt*(.035+this.current.orbitSpeed*.07)*(1-containment);
+    }
     this.updateUniforms(this.coreUniforms,time,this.organismWavePhase,this.coreGradientPhase,this.coreDigitPhase,.78);
     const overloadPulse=critical.coreOverload*(Math.sin(time*8.7+critical.seed)*.075
       +Math.sin(time*19.3)*.035+Math.sin(Math.floor(time*7.2))*.025);
@@ -1221,17 +1429,25 @@ export class CoreVisual{
     // Its previous visibility expression produced a short bell-shaped pulse
     // precisely as stable chaos handed ownership to the cube.
     const legacyKernelAllowed=!cubeTopologyActive||
-      this.cubePhase==='convergeToError'||this.cubePhase==='kernelHold'||
-      this.cubePhase==='reverseKernelHold'||this.cubePhase==='releaseRibbons';
+      this.cubePhase==='convergeToError'||this.cubePhase==='releaseRibbons';
+    const cubeKernelReleaseGate=this.cubePhase==='releaseRibbons'
+      ?THREE.MathUtils.smoothstep(1-cubeGather,.62,.96):1;
+    const terrainKernelOwnership=this.terrainPhase==='convergeSource'
+      ?0
+      :this.terrainPhase==='releaseTarget'
+        ?THREE.MathUtils.smoothstep(1-this.terrainConvergence,.72,.98)
+      :this.terrainPhase==='sourceHold'||this.terrainPhase==='releasePoints'
+        ||this.terrainPhase==='propagate'||this.terrainPhase==='collapsePoints'
+        ||this.terrainPhase==='coreToChaos'?0:1;
     this.coreUniforms.uVisibility.value=legacyKernelAllowed
-      ?coreVisibility*(1-this.terrainSourceConsumption):0;
-    const dynamicCoreX=Math.sin(time*.19)*.075+Math.sin(time*.071)*.025;
-    const cubeCoreRotation=cubeTopologyActive?0:this.frozenCoreRotation.x;
-    const cubeCoreYaw=cubeTopologyActive?0:this.frozenCoreRotation.y;
-    const cubeCoreRoll=cubeTopologyActive?0:this.frozenCoreRotation.z;
-    this.core.rotation.x=THREE.MathUtils.lerp(dynamicCoreX,cubeCoreRotation,topologyContainment);
-    this.core.rotation.y=THREE.MathUtils.lerp(this.coreRotation,cubeCoreYaw,topologyContainment);
-    this.core.rotation.z=THREE.MathUtils.lerp(0,cubeCoreRoll,topologyContainment);
+      ?coreVisibility*(1-this.terrainSourceConsumption)*terrainKernelOwnership
+        *cubeKernelReleaseGate:0;
+    if(this.topologyRotationLocked){
+      this.core.quaternion.copy(this.frozenTopologyCoreQuaternion);
+    }else{
+      const dynamicCoreX=Math.sin(time*.19)*.075+Math.sin(time*.071)*.025;
+      this.core.rotation.set(dynamicCoreX,this.coreRotation,0);
+    }
 
     const legacyChaosComplete=this.cubeSeedComplete;
     // ERROR containment may still be decaying internally when CUBE is entered.
@@ -1239,11 +1455,24 @@ export class CoreVisual{
     const chaosIntensity=cubeTopologyActive
       ?(legacyChaosComplete?0:THREE.MathUtils.lerp(1,.72,this.cubeSeedMorph))
       :Math.max(containment,critical.coreOverload*.72,this.stableChaosPresence);
+    const terrainChaosControlled=this.terrainPhase!=='inactive';
+    const effectiveChaosPresence=terrainChaosControlled?this.chaosVisualPresence:1;
+    const effectiveChaosIntensity=terrainChaosControlled
+      ?Math.max(chaosIntensity,this.chaosFillProgress):chaosIntensity;
+    const terrainChaosWarm=this.terrainPhase==='convergeSource'
+      ?THREE.MathUtils.smoothstep(this.chaosFillProgress,.58,1)
+      :this.terrainPhase==='sourceHold'?1
+        :this.terrainPhase==='releasePoints'||this.terrainPhase==='propagate'
+          ?this.chaosFillProgress
+          :this.terrainPhase==='collapsePoints'?1
+            :this.terrainPhase==='coreToChaos'
+              ?this.terrainDestination==='cube'?1:1-this.terrainChaosPaletteProgress
+              :this.cubeTerrainHandoff?1-this.cubeSeedMorph:0;
     this.containmentUniforms.forEach((uniforms,index)=>{
       uniforms.uTime.value=this.chaosLayerTimes[index];
       // The sphere's mass is removed only as individual cells complete.
       // The fragment shader turns this mass loss into clustered holes/streams.
-      uniforms.uIntensity.value=chaosIntensity*(1-this.terrainSourceConsumption);
+      uniforms.uIntensity.value=effectiveChaosIntensity*effectiveChaosPresence;
       uniforms.uSeed.value=this.errorSignals.seed+(index===0?.17:.73);
       uniforms.uLiving.value=this.livingChaosMix;
       uniforms.uMatterRemaining.value=cubeTopologyActive?this.cubeMatter.matterRemaining:1;
@@ -1251,10 +1480,16 @@ export class CoreVisual{
       uniforms.uCompression.value=cubeTopologyActive?this.cubeCompression:0;
       uniforms.uSeedMorph.value=cubeTopologyActive?this.cubeSeedMorph:0;
       uniforms.uTerrainMorph.value=0;
+      uniforms.uFillProgress.value=effectiveChaosPresence;
+      uniforms.uTerrainWarm.value=terrainChaosWarm;
       uniforms.uSeedCenter.value.set(0,0,0);
     });
     this.coreChaosUniforms.uTime.value=this.coreChaosTime;
-    const faultDigits=cubeTopologyActive?0:Math.max(containment,critical.coreOverload*.72);
+    const terrainFaultGate=this.terrainPhase==='inactive'?1
+      :this.terrainPhase==='convergeSource'||this.terrainPhase==='releaseTarget'
+        ?1-this.terrainConvergence:0;
+    const faultDigits=cubeTopologyActive?0
+      :Math.max(containment,critical.coreOverload*.72)*terrainFaultGate;
     // The outer free-particle layer is reserved for faults. CALM <-> WORK only
     // changes speed and scale, so no transient spherical shell can appear.
     this.coreChaosUniforms.uIntensity.value=cubeTopologyActive
@@ -1263,20 +1498,51 @@ export class CoreVisual{
     // The 640 legacy ERROR digits belong only to the gathered chaos reservoir.
     // Stop drawing them as soon as the topology morph starts; otherwise their
     // compressed spherical distribution briefly reads as a halo around the seed.
-    const cubeBinaryReservoir=cubeTopologyActive&&(
-      this.cubePhase==='convergeToError'||this.cubePhase==='kernelHold'||
-      this.cubePhase==='reverseKernelHold'||this.cubePhase==='releaseRibbons'
-    )?.82:0;
-    this.coreChaosUniforms.uVisibility.value=Math.max(faultDigits,cubeBinaryReservoir)
-      *(1-this.terrainSourceConsumption);
+    // The 640 binary points are part of the DISCO BALL, not CHAOS. They may
+    // belong to an ERROR final state, but never to a Cube/Terrain handoff.
+    this.coreChaosUniforms.uVisibility.value=faultDigits*effectiveChaosPresence;
     this.coreChaosUniforms.uCompression.value=cubeTopologyActive?this.cubeCompression:0;
     this.coreChaosUniforms.uSeedMorph.value=cubeTopologyActive?this.cubeSeedMorph:0;
     this.coreChaosUniforms.uTerrainMorph.value=0;
+    this.coreChaosUniforms.uFillProgress.value=terrainChaosControlled?this.chaosFillProgress:1;
+    this.coreChaosUniforms.uTransitionWarm.value=terrainChaosWarm;
     this.coreChaosUniforms.uSeedCenter.value.set(0,0,0);
     // The remaining chaos compacts as actual mass leaves for stabilised cells;
     // holes are generated in its shader at the same time, avoiding a plain
     // opacity fade or a residual full-size sphere.
-    this.containmentChaos.scale.setScalar(THREE.MathUtils.lerp(coreScale,1,this.cubeSeedMorph));
+    const baseChaosScale=THREE.MathUtils.lerp(coreScale,1,this.cubeSeedMorph);
+    const miniChaosScale=STATE_TUNING.work.coreScale*.5;
+    const cubeSizedChaosScale=CONFIG.EXPERIMENTS.cubeCellSize
+      /(CONFIG.CORE_RADIUS*.74*2);
+    let resolvedChaosScale=baseChaosScale;
+    if(this.terrainPhase==='convergeSource'&&this.terrainEntrySource!=='cube'){
+      resolvedChaosScale=THREE.MathUtils.lerp(
+        this.terrainChaosStartScale,miniChaosScale,this.terrainConvergence,
+      );
+    }else if(this.terrainPhase==='sourceHold'&&this.terrainEntrySource!=='cube'){
+      resolvedChaosScale=miniChaosScale;
+    }else if((this.terrainPhase==='releasePoints'||this.terrainPhase==='propagate')
+      &&this.terrainEntrySource!=='cube'){
+      // As field ownership spreads, the warm source is consumed and can only
+      // become smaller. It is no longer coupled to terrain.coreScale.
+      resolvedChaosScale=miniChaosScale*THREE.MathUtils.lerp(
+        1,.16,this.terrainSourceConsumption,
+      );
+    }else if(this.terrainPhase==='collapsePoints'||this.terrainPhase==='coreToChaos'){
+      const compactTarget=this.terrainDestination==='cube'
+        ?cubeSizedChaosScale:miniChaosScale;
+      const materialisation=THREE.MathUtils.smoothstep(this.chaosVisualPresence,0,1);
+      resolvedChaosScale=compactTarget*THREE.MathUtils.lerp(.55,1,materialisation);
+    }else if(this.terrainPhase==='releaseTarget'){
+      resolvedChaosScale=THREE.MathUtils.lerp(
+        baseChaosScale,miniChaosScale,this.terrainConvergence,
+      );
+    }else if(this.cubeTerrainHandoff){
+      resolvedChaosScale=THREE.MathUtils.lerp(
+        cubeSizedChaosScale,1,this.cubeSeedMorph,
+      );
+    }
+    this.containmentChaos.scale.setScalar(resolvedChaosScale);
     this.containmentChaos.rotation.set(0,0,0);
     const outerChaos=this.containmentChaos.children[0];
     const innerChaos=this.containmentChaos.children[1];
@@ -1303,8 +1569,10 @@ export class CoreVisual{
         index===critical.affectedRibbon?1:.16+critical.severity*.18,critical.severity);
       const ribbonRate=critical.ribbonRates[index];
       const localTempo=brokenTempo*ribbonRate;
-      ribbon.orbitAngle+=dt*this.current.orbitSpeed*(.13+index*.025)*(index===1?-1:1)*localTempo*(1-topologyContainment);
-      ribbon.selfPhase+=dt*this.current.selfRotation*(.88+index*.13)*localTempo*(1-topologyContainment);
+      if(!this.topologyRotationLocked||ribbonTopologyMotionAllowed){
+        ribbon.orbitAngle+=dt*this.current.orbitSpeed*(.13+index*.025)*(index===1?-1:1)*localTempo;
+        ribbon.selfPhase+=dt*this.current.selfRotation*(.88+index*.13)*localTempo;
+      }
       ribbon.gradientPhase+=dt*this.current.gradientSpeed*(.91+index*.08)*ribbonRate;
       ribbon.digitPhase+=dt*this.current.rewriteSpeed*(.9+index*.1)*ribbonRate;
       const desyncPhase=critical.timeDesync*localDamage*Math.sin(Math.floor((time+index*.17)*9.)*1.91);
@@ -1314,8 +1582,10 @@ export class CoreVisual{
       ribbon.uniforms.uGradientDamage.value*=localDamage;
       ribbon.uniforms.uGeometryDamage.value*=localDamage;
       const collapseBlend=rebuildingFromContainment?0:this.errorSignals.collapse;
-      ribbon.uniforms.uVisibility.value=(1-collapseBlend*(index===1?0:.72))*(1-topologyContainment*.995)
-        *(1-this.cubeMatter.presence)*(1-this.terrainSourceConsumption);
+      ribbon.uniforms.uRibbonAbsorption.value=terrainRibbonAbsorption;
+      ribbon.uniforms.uRibbonAbsorptionAnchor.value=(.08+index*.317)%1;
+      ribbon.uniforms.uVisibility.value=(1-collapseBlend*(index===1?0:.72))
+        *(1-legacyTopologyContainment*.995)*(1-this.cubeMatter.presence);
       const particles=ribbon.particleUniforms;
       const phaseParticleIntensity=Math.max(
         phaseError.distortion,phaseError.tear,phaseError.collapse,phaseError.eject,
@@ -1324,11 +1594,16 @@ export class CoreVisual{
         critical.missingData,critical.binaryEjection,critical.binaryAttraction,
         critical.coreAbsorption,critical.coreOverload*.55,
       );
+      const terrainParticleGate=this.terrainPhase==='inactive'?1
+        :this.terrainPhase==='convergeSource'||this.terrainPhase==='releaseTarget'
+          ?1-this.terrainConvergence:0;
       particles.uTime.value=time;
-      particles.uIntensity.value=Math.max(phaseParticleIntensity,criticalParticleIntensity);
+      particles.uIntensity.value=Math.max(phaseParticleIntensity,criticalParticleIntensity)
+        *terrainParticleGate;
       particles.uTear.value=this.errorSignals.tear*localDamage;
       particles.uCollapse.value=Math.max(this.errorSignals.collapse,critical.binaryAttraction*localDamage);
-      particles.uEject.value=this.errorSignals.eject*localDamage;particles.uContainment.value=topologyContainment;
+      particles.uEject.value=this.errorSignals.eject*localDamage;
+      particles.uContainment.value=legacyTopologyContainment*terrainParticleGate;
       particles.uErrorSeed.value=this.errorSignals.seed+index*.37;
       const flexX=Math.sin(time*(.19+index*.017)+ribbon.phase)*(.055+this.current.deformation*.3);
       const flexZ=Math.sin(time*(.113+index*.013)+ribbon.phase*1.7)*(.04+this.current.deformation*.22);
@@ -1344,16 +1619,28 @@ export class CoreVisual{
       const collapsedX=THREE.MathUtils.lerp(regularX,collapseX,collapseBlend);
       const collapsedY=THREE.MathUtils.lerp(regularY,collapseY,collapseBlend);
       const collapsedZ=THREE.MathUtils.lerp(regularZ,collapseZ,collapseBlend);
-      if(rebuildingFromContainment){
+      if(this.topologyRotationLocked&&!ribbonTopologyMotionAllowed){
+        ribbon.group.quaternion.copy(this.frozenTopologyRibbonQuaternions[index]);
+      }else if(rebuildingFromContainment){
         // Reorient while the ribbon is still hidden in the core, then reveal it
         // already on its CALM/WORK orbit instead of visibly unwinding outward.
         ribbon.group.rotation.set(regularX,regularY,regularZ);
       }else{
-        ribbon.group.rotation.set(
-          THREE.MathUtils.lerp(collapsedX,dominant.baseRotation.x,topologyContainment),
-          THREE.MathUtils.lerp(collapsedY,dominant.baseRotation.y,topologyContainment),
-          THREE.MathUtils.lerp(collapsedZ,dominant.baseRotation.z,topologyContainment),
-        );
+        ribbon.group.rotation.set(collapsedX,collapsedY,collapsedZ);
+      }
+      if(ribbonTopologyMotionAllowed){
+        if(this.cubePhase==='releaseRibbons'){
+          this.ribbonTargetQuaternion.copy(ribbon.group.quaternion);
+          const releaseTrajectoryBlend=THREE.MathUtils.smoothstep(
+            1-cubeGather,.03,.42,
+          );
+          ribbon.group.quaternion.slerpQuaternions(
+            this.frozenTopologyRibbonQuaternions[index],
+            this.ribbonTargetQuaternion,
+            releaseTrajectoryBlend,
+          );
+        }
+        this.frozenTopologyRibbonQuaternions[index].copy(ribbon.group.quaternion);
       }
       const complexBreath=(Math.sin(time*.47+ribbon.phase)*.58+Math.sin(time*.197+ribbon.phase*1.37)*.29
         +Math.sin(time*.083+ribbon.phase*.61)*.13)*this.current.widthVariation*.14;
@@ -1361,7 +1648,7 @@ export class CoreVisual{
       const collapsedScale=dominantRadius/CONFIG.RIBBON_RADII[index];
       const activeScale=THREE.MathUtils.lerp(normalScale,collapsedScale,collapseBlend);
       const containedScale=CONFIG.CORE_RADIUS*fixedCoreScale*.92/CONFIG.RIBBON_RADII[index];
-      const desiredScale=THREE.MathUtils.lerp(activeScale,containedScale,topologyContainment);
+      const desiredScale=THREE.MathUtils.lerp(activeScale,containedScale,legacyTopologyContainment);
       ribbon.group.scale.setScalar(THREE.MathUtils.clamp(desiredScale,.08,maxSafeScale));
       ribbon.mesh.position.z=Math.sin(time*.31+ribbon.phase)*(.018+this.current.deformation*.09)*(1-topologyContainment);
       this.deformShadowSurface(ribbon);
@@ -1370,11 +1657,13 @@ export class CoreVisual{
           this.organismWavePhase-ribbon.waveOffset+desyncPhase-ghost.lag*this.current.waveSpeed,
           ribbon.gradientPhase-ghost.lag*this.current.gradientSpeed,
           ribbon.digitPhase-ghost.lag*this.current.rewriteSpeed,individuality);
+        ghost.uniforms.uRibbonAbsorption.value=terrainRibbonAbsorption;
+        ghost.uniforms.uRibbonAbsorptionAnchor.value=(.08+index*.317)%1;
         const baseGhost=this.state==='work'?.34:this.state==='calm'?.24:0;
         const baseGhostAlpha=baseGhost*(ghost.lag<.1?1:.56);
         const damageGhostAlpha=critical.ghost*localDamage*(ghost.lag<.1?.28:.16);
-        ghost.uniforms.uVisibility.value=Math.max(baseGhostAlpha,damageGhostAlpha)*(1-topologyContainment)
-          *(1-this.cubeMatter.presence)*(1-this.terrainSourceConsumption);
+        ghost.uniforms.uVisibility.value=Math.max(baseGhostAlpha,damageGhostAlpha)
+          *(1-legacyTopologyContainment)*(1-this.cubeMatter.presence);
         ghost.uniforms.uSaturation.value=ghost.lag<.1?.56:.22;
         ghost.group.rotation.set(
           ribbon.group.rotation.x-ghost.lag*(.25+critical.timeDesync),
@@ -1390,19 +1679,18 @@ export class CoreVisual{
     const dynamicRootX=Math.cos(time*.17)*sharedEnergy*.5+Math.sin(time*.061)*.022;
     const dynamicRootYPosition=Math.sin(time*.41)*.028+Math.sin(time*.109)*.016;
     const cubeRootLock=cubeTopologyActive?cubeGather:containment;
-    const rootTargetRotation=cubeTopologyActive?0:1;
-    this.root.rotation.y=THREE.MathUtils.lerp(dynamicRootY,
-      this.frozenRootRotation.y*rootTargetRotation,cubeRootLock);
-    this.root.rotation.x=THREE.MathUtils.lerp(dynamicRootX,
-      this.frozenRootRotation.x*rootTargetRotation,cubeRootLock);
-    this.root.rotation.z=THREE.MathUtils.lerp(0,
-      this.frozenRootRotation.z*rootTargetRotation,cubeRootLock);
+    const rootPositionTarget=cubeTopologyActive?0:1;
+    if(this.topologyRotationLocked){
+      this.root.quaternion.copy(this.frozenTopologyRootQuaternion);
+    }else{
+      this.root.rotation.set(dynamicRootX,dynamicRootY,0);
+    }
     this.root.position.x=THREE.MathUtils.lerp(0,
-      this.frozenRootPosition.x*rootTargetRotation,cubeRootLock);
+      this.frozenRootPosition.x*rootPositionTarget,cubeRootLock);
     this.root.position.y=THREE.MathUtils.lerp(dynamicRootYPosition,
-      this.frozenRootPosition.y*rootTargetRotation,cubeRootLock);
+      this.frozenRootPosition.y*rootPositionTarget,cubeRootLock);
     this.root.position.z=THREE.MathUtils.lerp(0,
-      this.frozenRootPosition.z*rootTargetRotation,cubeRootLock);
+      this.frozenRootPosition.z*rootPositionTarget,cubeRootLock);
     this.updateLightRig();
     this.applyVisualOwnership();
     const terrainCamera=THREE.MathUtils.smoothstep(this.terrainPresence,.03,.96);

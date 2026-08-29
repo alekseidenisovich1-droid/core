@@ -34,7 +34,7 @@ let demoTimer=0;
 let autoIntegration=true;
 let criticalDamageIndex=-1;
 let lastArrowSwitch=0;
-const transitionSpeeds=[.2,.5,1] as const;
+const transitionSpeeds=[.25,.5,1] as const;
 let transitionSpeedIndex=2;
 
 const damageLabel=(damage:CriticalDamage)=>damage.replace(/[A-Z]/g,letter=>`_${letter}`).toUpperCase();
@@ -199,6 +199,7 @@ type CoreWindow=Window&{
     setTransitionSpeed:(value:number)=>void;
     getPhase:()=>string;
     getTerrainPhase:()=>string;
+    getTransitionDebug:()=>Readonly<Record<string,unknown>>;
     setTerrainParameter:(key:TerrainParameterKey,value:number)=>void;
     getTerrainParameters:()=>Readonly<Record<TerrainParameterKey,number>>;
   };
@@ -209,6 +210,7 @@ coreWindow.__coreVisualDebug={
   setTransitionSpeed:value=>visual.setCubeTransitionTimeScale(value),
   getPhase:()=>visual.getCubeTransitionPhase(),
   getTerrainPhase:()=>visual.getTerrainTransitionPhase(),
+  getTransitionDebug:()=>visual.getTransitionDebug(),
   setTerrainParameter:(key,value)=>visual.setTerrainParameter(key,value),
   getTerrainParameters:()=>visual.getTerrainParameters(),
 };
