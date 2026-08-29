@@ -1,5 +1,6 @@
 import './style.css';
 import './drag.css';
+import './controls.css';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { CodexActivityInterpreter } from './activity';
@@ -13,8 +14,16 @@ const scene=document.querySelector<HTMLElement>('#scene')!;
 const app=document.querySelector<HTMLElement>('#app')!;
 const hud=document.querySelector<HTMLElement>('#hud')!;
 const hint=document.querySelector<HTMLElement>('#hint')!;
+const chaosControls=document.querySelector<HTMLElement>('#chaos-controls')!;
+const chaosActivity=document.querySelector<HTMLInputElement>('#chaos-activity')!;
+const chaosActivityValue=document.querySelector<HTMLOutputElement>('#chaos-activity-value')!;
+const ribbonReliefToggle=document.querySelector<HTMLButtonElement>('#ribbon-relief-toggle')!;
+const ribbonRelief=document.querySelector<HTMLInputElement>('#ribbon-relief')!;
+const ribbonReliefValue=document.querySelector<HTMLOutputElement>('#ribbon-relief-value')!;
+const chaosLivingToggle=document.querySelector<HTMLButtonElement>('#chaos-living-toggle')!;
 const store=new CoreStore();
 const visual=new CoreVisual(scene);
+let lastRibbonReliefPercent=50;
 let hudPinned=false;
 let demoTimer=0;
 let autoIntegration=true;
@@ -47,7 +56,44 @@ store.subscribe(snapshot=>{
   fields.commands.textContent=String(snapshot.commands);
   fields.errors.textContent=String(snapshot.errors);
   hud.classList.toggle('visible',snapshot.hovered||hudPinned);
+  chaosControls.classList.toggle('visible',visualState==='calm'||visualState==='work');
   document.body.dataset.state=snapshot.state;
+});
+
+chaosActivity.addEventListener('input',()=>{
+  const percent=Number(chaosActivity.value);
+  chaosActivityValue.value=`${percent}%`;
+  visual.setChaosSpeed(percent/100);
+});
+
+ribbonReliefToggle.addEventListener('click',()=>{
+  const enabled=ribbonReliefToggle.getAttribute('aria-pressed')!=='true';
+  const percent=enabled?lastRibbonReliefPercent:0;
+  ribbonReliefToggle.setAttribute('aria-pressed',String(enabled));
+  ribbonReliefToggle.textContent=`RIBBON RELIEF · ${enabled?'ON':'OFF'}`;
+  ribbonRelief.value=String(percent);
+  ribbonReliefValue.value=`${percent}%`;
+  visual.setWorkRibbonRelief(enabled);
+  visual.setWorkRibbonReliefStrength(percent/50);
+});
+
+ribbonRelief.addEventListener('input',()=>{
+  const percent=Number(ribbonRelief.value);
+  const enabled=percent>0;
+  if(enabled)lastRibbonReliefPercent=percent;
+  ribbonReliefValue.value=`${percent}%`;
+  ribbonReliefToggle.setAttribute('aria-pressed',String(enabled));
+  ribbonReliefToggle.textContent=`RIBBON RELIEF · ${enabled?'ON':'OFF'}`;
+  visual.setWorkRibbonRelief(enabled);
+  // The previous experimental relief is the 50% reference point.
+  visual.setWorkRibbonReliefStrength(percent/50);
+});
+
+chaosLivingToggle.addEventListener('click',()=>{
+  const enabled=chaosLivingToggle.getAttribute('aria-pressed')!=='true';
+  chaosLivingToggle.setAttribute('aria-pressed',String(enabled));
+  chaosLivingToggle.textContent=`CHAOS · ${enabled?'ON':'OFF'}`;
+  visual.setLivingChaos(enabled);
 });
 
 const activity=new CodexActivityInterpreter({
@@ -126,8 +172,24 @@ listen<ActivityPayload>('core-activity',({payload})=>{
   if(autoIntegration)activity.sample(payload.codexCpu);
 }).catch(()=>{ /* Browser development keeps the manual simulator available. */ });
 
-app.addEventListener('pointerenter',()=>store.dispatch({type:'HOVER_ENTER'}));
-app.addEventListener('pointerleave',()=>store.dispatch({type:'HOVER_LEAVE'}));
+let pointerNearCore=false;
+app.addEventListener('pointermove',event=>{
+  const bounds=app.getBoundingClientRect();
+  const dx=event.clientX-(bounds.left+bounds.width*.5);
+  const dy=event.clientY-(bounds.top+bounds.height*.5);
+  // The HUD reacts only near the actual core/chaos volume, not anywhere in
+  // the large transparent native window.
+  const hoverRadius=Math.max(52,Math.min(bounds.width,bounds.height)*.105);
+  const next=dx*dx+dy*dy<=hoverRadius*hoverRadius;
+  if(next===pointerNearCore)return;
+  pointerNearCore=next;
+  store.dispatch({type:next?'HOVER_ENTER':'HOVER_LEAVE'});
+});
+app.addEventListener('pointerleave',()=>{
+  if(!pointerNearCore)return;
+  pointerNearCore=false;
+  store.dispatch({type:'HOVER_LEAVE'});
+});
 hud.onpointerdown=event=>{
   if(event.button!==0)return;
   event.preventDefault();

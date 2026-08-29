@@ -28,6 +28,31 @@ export const CONFIG = {
   CODEX_RELEASE_CPU: 0.45,
   SAFE_RENDER_MARGIN: 0.15,
   CAMERA_Z: 10.4,
+  // Centralized spatial-lighting controls. CORE remains mostly dark: the
+  // binary matter is the source of visual energy, not a global wash of light.
+  LIGHTING: {
+    ambientIntensity: .16,
+    fillIntensity: .3,
+    keyIntensity: .28,
+    shadowMapSize: 512,
+    shadowIntensity: .22,
+    shadowBlurSamples: 20,
+    shadowBias: -.00035,
+    shadowNormalBias: .042,
+    shadowSoftness: 12,
+    surfaceOpacity: .19,
+    ribbonEmission: .2,
+    spillIntensity: 1,
+    depthFadeStrength: .18,
+  },
+  EXPERIMENTS: {
+    workRibbonRelief: true,
+    chaosSpeedDefault: 1,
+    chaosSpeedMin: .4,
+    chaosSpeedMax: 1.4,
+    // Local hill height is proportional to the current Möbius radius.
+    ribbonReliefRadiusRatio: .11,
+  },
 } as const;
 
 export interface StateTuning {

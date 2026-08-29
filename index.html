@@ -19,6 +19,14 @@
           <div><dt>errors</dt><dd id="hud-errors">0</dd></div>
         </dl>
       </section>
+      <section id="chaos-controls" aria-label="Chaos experiment controls">
+        <label for="chaos-activity">CHAOS SPEED <output id="chaos-activity-value">100%</output></label>
+        <input id="chaos-activity" type="range" min="40" max="140" value="100" step="1" />
+        <button id="ribbon-relief-toggle" type="button" aria-pressed="true">RIBBON RELIEF · ON</button>
+        <label for="ribbon-relief">RIBBON RELIEF <output id="ribbon-relief-value">50%</output></label>
+        <input id="ribbon-relief" type="range" min="0" max="100" value="50" step="1" />
+        <button id="chaos-living-toggle" type="button" aria-pressed="true">CHAOS · ON</button>
+      </section>
       <div id="hint">3 ERROR · 4 CRITICAL · 5 CRITICAL 2 · ←/→ effects · A live</div>
     </main>
     <script type="module" src="/src/main.ts"></script>

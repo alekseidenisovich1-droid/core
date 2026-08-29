@@ -2,10 +2,10 @@ export const vertexShader=/* glsl */`
   uniform float uTime,uEnergy,uGlitch,uMobius,uOffset,uRibbonRadius;
   uniform float uWavePhase,uWaveAmplitude,uWaveComplexity,uDeformation,uWidthVariation,uTwist;
   uniform float uErrorDistort,uErrorTear,uErrorCollapse,uErrorEject,uErrorContainment,uErrorJerk,uErrorSeed;
-  uniform float uGeometryDamage;
+  uniform float uGeometryDamage,uReliefActivity,uWorkRelief,uReliefRatio;
   varying vec2 vUv;
   varying vec3 vPos,vNormal;
-  varying float vWave;
+  varying float vWave,vViewDepth;
 
   vec3 rotateAroundAxis(vec3 value,vec3 axis,float angle){
     return value*cos(angle)+cross(axis,value)*sin(angle)+axis*dot(axis,value)*(1.0-cos(angle));
@@ -55,6 +55,13 @@ export const vertexShader=/* glsl */`
       center.z+=damagePulse*sin(surfaceU*43.982+brokenClock*2.1)*.28;
       offset=rotateAroundAxis(offset,tangent,damagePulse*sin(surfaceU*81.68)*1.35);
       p=center+offset;
+      // Optional WORK experiment: a living relief whose height-to-radius
+      // ratio follows the outer chaos layer rather than a fixed world size.
+      float hillClock=brokenClock*(.64+uOffset*.17);
+      float hillA=pow(.5+.5*sin(theta*5.-hillClock+sin(theta*2.+hillClock*.37+uOffset*8.)*1.25),4.);
+      float hillB=pow(.5+.5*sin(theta*7.+hillClock*.71+uOffset*13.),3.);
+      float livingRelief=hillA*.9-hillB*.3+sin(theta*11.-hillClock*1.17)*.08;
+      p+=normal*livingRelief*uRibbonRadius*uReliefRatio*uReliefActivity*uWorkRelief;
       float tearZone=step(.42,sin(surfaceU*37.699112+uErrorSeed*3.1+floor(brokenClock*5.)*.73));
       p+=radial*tearZone*uErrorTear*(.055+.07*sin(surfaceU*18.849556+uErrorSeed));
       p+=tangent*tearZone*uErrorTear*uErrorJerk*.045;
@@ -75,7 +82,9 @@ export const vertexShader=/* glsl */`
     p+=normal*(rupture+brokenWave*uGlitch*(1.-uErrorContainment)*.085);
     p.z+=brokenWave*uGlitch*(1.-uErrorContainment)*.065;
     vPos=p;
-    gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);
+    vec4 mvPosition=modelViewMatrix*vec4(p,1.0);
+    vViewDepth=-mvPosition.z;
+    gl_Position=projectionMatrix*mvPosition;
   }
 `;
 
@@ -85,11 +94,11 @@ export const fragmentShader=/* glsl */`
   uniform float uWavePhase,uWaveAmplitude,uWaveComplexity,uDigitScale,uDigitDensity;
   uniform float uGradientPhase,uDigitPhase;
   uniform float uErrorDistort,uErrorTear,uErrorCollapse,uErrorEject,uErrorContainment,uErrorJerk,uErrorSeed;
-  uniform float uVisibility,uRgbSplit,uSaturation;
+  uniform float uVisibility,uRgbSplit,uSaturation,uDepthFade;
   uniform float uErrorStructure,uMissingData,uGradientDamage;
   varying vec2 vUv;
   varying vec3 vPos,vNormal;
-  varying float vWave;
+  varying float vWave,vViewDepth;
 
   float hash21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
   float boxSdf(vec2 p,vec2 b){vec2 d=abs(p)-b;return length(max(d,0.0))+min(max(d.x,d.y),0.0);}
@@ -181,9 +190,12 @@ export const fragmentShader=/* glsl */`
     vec3 splitRgb=vec3(color.r*channelMask.r,color.g*channelMask.g,color.b*channelMask.b)
       *(1.08+uEnergy*.3+fresnel*.34)*waveGlow;
     vec3 finalColor=mix(stableRgb,splitRgb,split);
+    // Subtle true view-depth cue; this is deliberately not a fog overlay.
+    float depthFade=1.0-smoothstep(8.2,13.4,vViewDepth)*uDepthFade;
+    finalColor*=depthFade;
     float luminance=dot(finalColor,vec3(.2126,.7152,.0722));
     finalColor=mix(vec3(luminance),finalColor,uSaturation);
-    gl_FragColor=vec4(finalColor,min(alpha,1.));
+    gl_FragColor=vec4(finalColor,min(alpha*mix(1.,.82,uDepthFade),1.));
   }
 `;
 
@@ -227,21 +239,48 @@ export const particleVertexShader=/* glsl */`
 `;
 
 export const containmentVertexShader=/* glsl */`
-  uniform float uTime,uIntensity,uSeed;
+  uniform float uTime,uIntensity,uSeed,uLayer,uLiving;
   varying vec3 vObjectPos,vNormal;
   varying float vPressure;
+  float hash41(vec3 p,float epoch){
+    return fract(sin(dot(p,vec3(127.1,311.7,74.7))+epoch*91.17+uSeed*53.3)*43758.5453);
+  }
+  float valueNoise(vec3 p,float epoch){
+    vec3 cell=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+    float n000=hash41(cell+vec3(0,0,0),epoch),n100=hash41(cell+vec3(1,0,0),epoch);
+    float n010=hash41(cell+vec3(0,1,0),epoch),n110=hash41(cell+vec3(1,1,0),epoch);
+    float n001=hash41(cell+vec3(0,0,1),epoch),n101=hash41(cell+vec3(1,0,1),epoch);
+    float n011=hash41(cell+vec3(0,1,1),epoch),n111=hash41(cell+vec3(1,1,1),epoch);
+    float z0=mix(mix(n000,n100,f.x),mix(n010,n110,f.x),f.y);
+    float z1=mix(mix(n001,n101,f.x),mix(n011,n111,f.x),f.y);
+    return mix(z0,z1,f.z);
+  }
   void main(){
+    vec3 direction=normalize(position+vec3(.0001));
+    // Exact original Git displacement formula. The static field at t=0 is
+    // retained as a permanent reference mode for CHAOS OFF.
+    float originalField=sin(position.x*19.)*sin(position.y*23.)+sin(position.z*31.)*.55;
     float field=sin(position.x*19.+uTime*5.7+uSeed)
       *sin(position.y*23.-uTime*7.1)+sin(position.z*31.+uTime*9.3)*.55;
-    vPressure=.5+.5*field;
-    vec3 p=position+normal*field*.045*uIntensity;
+    // A continuously changing spatial mask keeps about half of the regions at
+    // full original relief while the other half settles onto the base sphere.
+    float maskClock=uTime*(.28+uLayer*.035);
+    float epoch=floor(maskClock),transition=smoothstep(.12,.88,fract(maskClock));
+    vec3 maskPosition=direction*(4.2+uLayer*.7)+uSeed*3.1;
+    float oldMask=valueNoise(maskPosition,epoch);
+    float newMask=valueNoise(maskPosition,epoch+1.);
+    float activity=smoothstep(.44,.56,mix(oldMask,newMask,transition));
+    float livingField=field*activity;
+    float activeField=mix(originalField,livingField,uLiving);
+    vPressure=.5+.5*activeField;
+    vec3 p=position+normal*activeField*.045*uIntensity;
     vObjectPos=p;vNormal=normalize(normalMatrix*normal);
     gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);
   }
 `;
 
 export const containmentFragmentShader=/* glsl */`
-  uniform float uTime,uIntensity,uSeed;
+  uniform float uTime,uIntensity,uSeed,uLayer;
   varying vec3 vObjectPos,vNormal;
   varying float vPressure;
   float hash31(vec3 p){p=fract(p*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}
@@ -253,11 +292,12 @@ export const containmentFragmentShader=/* glsl */`
     float blocks=step(.46,hash31(floor(q*1.7)+floor(uTime*9.)+uSeed));
     float pulse=pow(.5+.5*sin(uTime*13.7+hash31(floor(q))*12.),5.);
     vec3 pink=vec3(1.,.025,.46),cyan=vec3(.04,.72,1.),purple=vec3(.38,.015,1.);
-    vec3 color=mix(purple,pink,.5+.5*sin(scroll+uTime*2.1));
-    color=mix(color,cyan,blocks*(.3+.55*pulse));
+    vec3 layerBase=mix(purple,pink,uLayer*.56);
+    vec3 color=mix(layerBase,pink,.28+.34*sin(scroll+uTime*2.1));
+    color=mix(color,cyan,blocks*(.18+.42*pulse)*(1.-uLayer*.35));
     color+=vec3(1.,.3,.72)*pulse*.42;
     float fresnel=pow(1.-abs(dot(normalize(vNormal),vec3(0.,0.,1.))),2.);
-    float alpha=uIntensity*(.2+vPressure*.28+blocks*.18+pulse*.22+fresnel*.12);
+    float alpha=uIntensity*(.14+vPressure*.24+blocks*.12+pulse*.18+fresnel*.1);
     gl_FragColor=vec4(color*(.78+pulse*.65),alpha);
   }
 `;

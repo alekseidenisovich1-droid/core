@@ -21,23 +21,33 @@ type Uniforms={
   uErrorEject:{value:number};uErrorContainment:{value:number};uErrorJerk:{value:number};uErrorSeed:{value:number};
   uVisibility:{value:number};uRgbSplit:{value:number};uErrorStructure:{value:number};uSaturation:{value:number};
   uMissingData:{value:number};uGradientDamage:{value:number};uGeometryDamage:{value:number};
+  uDepthFade:{value:number};
+  uReliefActivity:{value:number};uWorkRelief:{value:number};uReliefRatio:{value:number};
 };
 type ParticleUniforms={
   uTime:{value:number};uIntensity:{value:number};uTear:{value:number};
   uCollapse:{value:number};uEject:{value:number};uContainment:{value:number};
   uErrorSeed:{value:number};uPixelRatio:{value:number};
 };
-type ContainmentUniforms={uTime:{value:number};uIntensity:{value:number};uSeed:{value:number}};
+type ContainmentUniforms={
+  uTime:{value:number};uIntensity:{value:number};uSeed:{value:number};uLayer:{value:number};
+  uLiving:{value:number};
+};
 type CoreChaosUniforms={
   uTime:{value:number};uIntensity:{value:number};uVisibility:{value:number};uPixelRatio:{value:number};
 };
 type Ribbon={
-  group:THREE.Group;mesh:THREE.Mesh;uniforms:Uniforms;baseRotation:THREE.Euler;
+  group:THREE.Group;mesh:THREE.Mesh;surface:THREE.Mesh;uniforms:Uniforms;baseRotation:THREE.Euler;
+  surfaceGeometry:THREE.BufferGeometry;surfaceBasePositions:Float32Array;radius:number;
   particles:THREE.Points;particleUniforms:ParticleUniforms;
   ghosts:{group:THREE.Group;mesh:THREE.Mesh;uniforms:Uniforms;lag:number}[];
   phase:number;orbitAngle:number;selfPhase:number;waveOffset:number;
   gradientPhase:number;digitPhase:number;
 };
+
+type LightingDebugKey='directLight'|'shadows'|'contactShadows'|'ambientOcclusion'|'emissive'
+  |'microGlow'|'mesoGlow'|'macroGlow'|'indirectLightSpill'|'depthFade';
+type LightingDebug=Record<LightingDebugKey,boolean>;
 
 const damp=(current:number,target:number,dt:number,rate:number=CONFIG.STATE_TRANSITION_SPEED)=>
   THREE.MathUtils.lerp(current,target,1-Math.exp(-dt*rate));
@@ -57,12 +67,26 @@ function makeMaterial(offset:number,grid:THREE.Vector2,side:THREE.Side,mobius:nu
     uSaturation:{value:1},
     uErrorStructure:{value:0},uMissingData:{value:0},uGradientDamage:{value:0},
     uGeometryDamage:{value:0},
+    uDepthFade:{value:CONFIG.LIGHTING.depthFadeStrength},
+    uReliefActivity:{value:1},uWorkRelief:{value:0},
+    uReliefRatio:{value:CONFIG.EXPERIMENTS.ribbonReliefRadiusRatio},
   };
   const material=new THREE.ShaderMaterial({
     uniforms,vertexShader,fragmentShader,transparent:true,depthWrite:false,side,
     blending:THREE.NormalBlending,
   });
   return{material,uniforms};
+}
+
+// The dark physical skin writes real depth and both casts and receives soft
+// shadows. The existing digit shader stays above it as the emissive material.
+function makeSurfaceMaterial(){
+  return new THREE.MeshStandardMaterial({
+    color:0x21172b,emissive:0x210b2e,
+    emissiveIntensity:CONFIG.LIGHTING.ribbonEmission,
+    roughness:.64,metalness:.18,transparent:true,opacity:CONFIG.LIGHTING.surfaceOpacity,
+    side:THREE.DoubleSide,depthWrite:true,
+  });
 }
 
 function mobiusPoint(u:number,v:number,radius:number,out:THREE.Vector3){
@@ -134,14 +158,31 @@ export class CoreVisual{
   private coreUniforms:Uniforms;
   private core:THREE.Mesh;
   private containmentChaos:THREE.Group;
-  private containmentUniforms:ContainmentUniforms;
+  private containmentUniforms:[ContainmentUniforms,ContainmentUniforms];
   private coreChaosUniforms:CoreChaosUniforms;
-  private halo:THREE.Sprite;
+  private ambientLight:THREE.AmbientLight;
+  private fillLight:THREE.HemisphereLight;
+  private keyLight:THREE.DirectionalLight;
+  private coreAreaLights:THREE.PointLight[]=[];
+  private lightingDebug:LightingDebug={
+    directLight:true,shadows:true,contactShadows:true,ambientOcclusion:true,emissive:true,
+    microGlow:true,mesoGlow:true,macroGlow:true,indirectLightSpill:true,depthFade:true,
+  };
   private state:VisualState='calm';
   private hovered=false;
   private current:StateTuning={...STATE_TUNING.calm};
   private errorStructure=0;
   private workCoreChaos=0;
+  private stableChaosPresence=1;
+  private coreChaosTime=0;
+  private coreChaosSpeed=1/3;
+  private chaosLayerTimes:[number,number]=[0,2.7];
+  private chaosSpeedControl:number=CONFIG.EXPERIMENTS.chaosSpeedDefault;
+  private livingChaosEnabled=true;
+  private livingChaosMix=1;
+  private workRibbonReliefEnabled:boolean=CONFIG.EXPERIMENTS.workRibbonRelief;
+  private workRibbonReliefStrength=1;
+  private workRibbonRelief=0;
   private organismWavePhase=0;
   private coreGradientPhase=.1;
   private coreDigitPhase=.3;
@@ -165,37 +206,70 @@ export class CoreVisual{
   constructor(container:HTMLElement){
     this.renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:'high-performance'});
     this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.setClearColor(0,0);
+    this.renderer.outputColorSpace=THREE.SRGBColorSpace;
+    this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=.94;
+    this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.VSMShadowMap;
     container.append(this.renderer.domElement);this.camera.position.z=CONFIG.CAMERA_Z;this.scene.add(this.root);
+    this.ambientLight=new THREE.AmbientLight(0x271839,CONFIG.LIGHTING.ambientIntensity);
+    this.fillLight=new THREE.HemisphereLight(0x3b2752,0x030207,CONFIG.LIGHTING.fillIntensity);
+    this.keyLight=new THREE.DirectionalLight(0xf3d8ff,CONFIG.LIGHTING.keyIntensity);
+    this.keyLight.position.set(3.6,4.8,6.2);this.keyLight.castShadow=true;
+    this.keyLight.shadow.mapSize.set(CONFIG.LIGHTING.shadowMapSize,CONFIG.LIGHTING.shadowMapSize);
+    this.keyLight.shadow.bias=CONFIG.LIGHTING.shadowBias;
+    this.keyLight.shadow.normalBias=CONFIG.LIGHTING.shadowNormalBias;
+    this.keyLight.shadow.radius=CONFIG.LIGHTING.shadowSoftness;
+    this.keyLight.shadow.intensity=CONFIG.LIGHTING.shadowIntensity;
+    this.keyLight.shadow.blurSamples=CONFIG.LIGHTING.shadowBlurSamples;
+    const shadowCamera=this.keyLight.shadow.camera as THREE.OrthographicCamera;
+    shadowCamera.left=-4;shadowCamera.right=4;shadowCamera.top=4;shadowCamera.bottom=-4;
+    shadowCamera.near=.4;shadowCamera.far=18;
+    this.scene.add(this.ambientLight,this.fillLight,this.keyLight,this.keyLight.target);
+    const emitterPoints=[
+      new THREE.Vector3(1,1,1),new THREE.Vector3(-1,-1,1),
+      new THREE.Vector3(-1,1,-1),new THREE.Vector3(1,-1,-1),
+    ];
+    const emitterColors=[0xff4fa3,0xc65cff,0xff78bc,0x9b67ff] as const;
+    emitterPoints.forEach((point,index)=>{
+      const light=new THREE.PointLight(emitterColors[index],CONFIG.LIGHTING.spillIntensity*.22,4.4,2);
+      light.position.copy(point.normalize().multiplyScalar(CONFIG.CORE_RADIUS*.34));
+      light.castShadow=true;light.shadow.mapSize.set(256,256);
+      light.shadow.bias=-.0014;light.shadow.normalBias=.06;
+      light.shadow.radius=8;light.shadow.intensity=.52;light.shadow.blurSamples=10;
+      this.coreAreaLights.push(light);this.root.add(light);
+    });
     const coreShader=makeMaterial(.1,new THREE.Vector2(
       CONFIG.CORE_DIGIT_GRID_X/CONFIG.DIGIT_SIZE*CONFIG.DIGIT_DENSITY,
       CONFIG.CORE_DIGIT_GRID_Y/CONFIG.DIGIT_SIZE*CONFIG.DIGIT_DENSITY,
     ),THREE.FrontSide,0);
     this.coreUniforms=coreShader.uniforms;
-    this.core=new THREE.Mesh(new THREE.SphereGeometry(CONFIG.CORE_RADIUS,112,72),coreShader.material);
+    const coreGeometry=new THREE.SphereGeometry(CONFIG.CORE_RADIUS,112,72);
+    this.core=new THREE.Mesh(coreGeometry,coreShader.material);
     this.core.renderOrder=12;
     this.root.add(this.core);
     const containment=this.createContainmentChaos();
     this.containmentChaos=containment.group;this.containmentUniforms=containment.uniforms;
     this.coreChaosUniforms=containment.particleUniforms;
     this.root.add(this.containmentChaos);
-    const haloMaterial=new THREE.SpriteMaterial({
-      map:this.glowTexture(),color:0xc551ff,transparent:true,opacity:this.current.glow,
-      blending:THREE.AdditiveBlending,depthWrite:false,
-    });
-    this.halo=new THREE.Sprite(haloMaterial);this.halo.scale.set(2.8,2.8,1);this.root.add(this.halo);
     for(let i=0;i<3;i++)this.ribbons.push(this.createRibbon(i));
     this.resize();addEventListener('resize',()=>this.resize());
   }
 
   private createContainmentChaos(){
-    const uniforms:ContainmentUniforms={uTime:{value:0},uIntensity:{value:0},uSeed:{value:0}};
-    const material=new THREE.ShaderMaterial({
-      uniforms,vertexShader:containmentVertexShader,fragmentShader:containmentFragmentShader,
-      transparent:true,depthWrite:false,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,
-    });
     const group=new THREE.Group();
-    const outer=new THREE.Mesh(new THREE.SphereGeometry(CONFIG.CORE_RADIUS*.74,72,48),material);
-    const inner=new THREE.Mesh(new THREE.IcosahedronGeometry(CONFIG.CORE_RADIUS*.48,5),material);
+    const makeLayer=(geometry:THREE.BufferGeometry,layer:number,seed:number)=>{
+      const uniforms:ContainmentUniforms={
+        uTime:{value:0},uIntensity:{value:0},uSeed:{value:seed},uLayer:{value:layer},uLiving:{value:1},
+      };
+      const material=new THREE.ShaderMaterial({
+        uniforms,vertexShader:containmentVertexShader,fragmentShader:containmentFragmentShader,
+        transparent:true,depthWrite:false,depthTest:true,side:THREE.DoubleSide,
+        blending:THREE.AdditiveBlending,
+      });
+      return{mesh:new THREE.Mesh(geometry,material),uniforms};
+    };
+    const outerLayer=makeLayer(new THREE.SphereGeometry(CONFIG.CORE_RADIUS*.74,72,48),0,.17);
+    const innerLayer=makeLayer(new THREE.IcosahedronGeometry(CONFIG.CORE_RADIUS*.48,5),1,.73);
+    const outer=outerLayer.mesh,inner=innerLayer.mesh;
     outer.renderOrder=5;inner.renderOrder=6;inner.rotation.set(.7,.2,.4);
     const particleCount=640;
     const positions=new Float32Array(particleCount*3),seeds=new Float32Array(particleCount);
@@ -223,7 +297,7 @@ export class CoreVisual{
     });
     const digits=new THREE.Points(particleGeometry,particleMaterial);digits.renderOrder=7;
     group.add(outer,inner,digits);
-    return{group,uniforms,particleUniforms};
+    return{group,uniforms:[outerLayer.uniforms,innerLayer.uniforms] as [ContainmentUniforms,ContainmentUniforms],particleUniforms};
   }
 
   setSnapshot(snapshot:Readonly<Snapshot>){
@@ -247,14 +321,20 @@ export class CoreVisual{
     this.criticalDirector.setDamagePreview(damage);
   }
 
-  private glowTexture(){
-    const canvas=document.createElement('canvas');canvas.width=canvas.height=256;
-    const context=canvas.getContext('2d')!;
-    const glow=context.createRadialGradient(128,128,0,128,128,128);
-    glow.addColorStop(0,'rgba(255,255,255,.42)');glow.addColorStop(.18,'rgba(255,50,180,.17)');
-    glow.addColorStop(.5,'rgba(110,40,255,.06)');glow.addColorStop(1,'transparent');
-    context.fillStyle=glow;context.fillRect(0,0,256,256);return new THREE.CanvasTexture(canvas);
+  /** Debug hooks for the lighting study; the normal experience keeps all on. */
+  setLightingDebug(flag:LightingDebugKey,enabled:boolean){
+    this.lightingDebug[flag]=enabled;
   }
+
+  setChaosSpeed(value:number){
+    this.chaosSpeedControl=THREE.MathUtils.clamp(
+      value,CONFIG.EXPERIMENTS.chaosSpeedMin,CONFIG.EXPERIMENTS.chaosSpeedMax,
+    );
+  }
+
+  setWorkRibbonRelief(enabled:boolean){this.workRibbonReliefEnabled=enabled;}
+  setWorkRibbonReliefStrength(value:number){this.workRibbonReliefStrength=THREE.MathUtils.clamp(value,0,2);}
+  setLivingChaos(enabled:boolean){this.livingChaosEnabled=enabled;}
 
   private createEjectionParticles(radius:number,halfWidth:number,index:number){
     const count=CONFIG.ERROR_PARTICLES_PER_RIBBON;
@@ -290,7 +370,14 @@ export class CoreVisual{
       CONFIG.RIBBON_DIGIT_GRID_X/CONFIG.DIGIT_SIZE*CONFIG.DIGIT_DENSITY,
       CONFIG.RIBBON_DIGIT_GRID_Y/CONFIG.DIGIT_SIZE*CONFIG.DIGIT_DENSITY,
     ),THREE.DoubleSide,1,radius);
-    const mesh=new THREE.Mesh(geometry,shader.material);const group=new THREE.Group();group.add(mesh);
+    const surfaceGeometry=createMobiusGeometry(radius,CONFIG.RIBBON_HALF_WIDTHS[index],180,16);
+    const surfaceBasePositions=new Float32Array(
+      (surfaceGeometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array,
+    );
+    const surface=new THREE.Mesh(surfaceGeometry,makeSurfaceMaterial());
+    surface.castShadow=true;surface.receiveShadow=true;surface.renderOrder=3;
+    const mesh=new THREE.Mesh(geometry,shader.material);mesh.renderOrder=4;
+    const group=new THREE.Group();group.add(surface,mesh);
     const particleLayer=this.createEjectionParticles(radius,CONFIG.RIBBON_HALF_WIDTHS[index],index);
     group.add(particleLayer.particles);
     const ghosts=[.075,.145].map(lag=>{
@@ -307,7 +394,7 @@ export class CoreVisual{
       new THREE.Euler(.72,.08,.16),new THREE.Euler(-.48,.62,1.38),new THREE.Euler(.16,-.72,-.58),
     ];
     group.rotation.copy(rotations[index]);this.root.add(group);
-    return{group,mesh,uniforms:shader.uniforms,particles:particleLayer.particles,ghosts,
+    return{group,mesh,surface,surfaceGeometry,surfaceBasePositions,radius,uniforms:shader.uniforms,particles:particleLayer.particles,ghosts,
       particleUniforms:particleLayer.particleUniforms,baseRotation:rotations[index],phase:index*2.137,
       orbitAngle:index*.43,selfPhase:index*1.71,waveOffset:index*.52,
       gradientPhase:index*.23,digitPhase:index*.71};
@@ -343,16 +430,86 @@ export class CoreVisual{
     u.uMissingData.value=this.criticalSignals.missingData;
     u.uGradientDamage.value=this.criticalSignals.gradientDamage;
     u.uGeometryDamage.value=this.criticalSignals.geometryDamage;
+    u.uDepthFade.value=this.lightingDebug.depthFade?CONFIG.LIGHTING.depthFadeStrength:0;
+    u.uReliefActivity.value=this.workRibbonReliefStrength;u.uWorkRelief.value=this.workRibbonRelief;
     u.uRgbSplit.value=this.state==='error'?THREE.MathUtils.clamp(
       this.errorSignals.distortion*.55+this.errorSignals.tear*.9
       +this.errorSignals.collapse*.45+this.errorSignals.eject*.72,0,1):0;
   }
 
+  private updateLightRig(){
+    const debug=this.lightingDebug;
+    this.keyLight.intensity=debug.directLight?CONFIG.LIGHTING.keyIntensity:0;
+    this.keyLight.castShadow=debug.shadows&&debug.contactShadows;
+    this.ambientLight.intensity=debug.ambientOcclusion?CONFIG.LIGHTING.ambientIntensity:0;
+    this.fillLight.intensity=debug.directLight?CONFIG.LIGHTING.fillIntensity:0;
+    this.coreAreaLights.forEach(light=>{
+      light.intensity=debug.indirectLightSpill
+        ?CONFIG.LIGHTING.spillIntensity*(.17+this.current.energy*.08):0;
+      light.castShadow=debug.shadows&&debug.contactShadows;
+    });
+    this.ribbons.forEach(ribbon=>{
+      ribbon.surface.position.copy(ribbon.mesh.position);
+      ribbon.surface.visible=ribbon.uniforms.uVisibility.value>.01;
+      const surfaceMaterial=ribbon.surface.material as THREE.MeshStandardMaterial;
+      surfaceMaterial.emissiveIntensity=debug.emissive
+        ?CONFIG.LIGHTING.ribbonEmission*(.62+this.current.energy*.28):0;
+    });
+  }
+
+  // Reuses a compact physical proxy each frame. Its silhouette follows the
+  // animated material closely enough for stable VSM contact/self-shadows,
+  // while the dense glyph mesh remains entirely on the GPU.
+  private deformShadowSurface(ribbon:Ribbon){
+    const positions=ribbon.surfaceGeometry.getAttribute('position') as THREE.BufferAttribute;
+    const uvs=ribbon.surfaceGeometry.getAttribute('uv') as THREE.BufferAttribute;
+    const normals=ribbon.surfaceGeometry.getAttribute('normal') as THREE.BufferAttribute;
+    const base=ribbon.surfaceBasePositions,u=ribbon.uniforms;
+    const phase=u.uWavePhase.value-u.uOffset.value*.7+u.uErrorJerk.value*.42;
+    for(let i=0;i<positions.count;i++){
+      const p=i*3,theta=uvs.getX(i)*Math.PI*2,c=Math.cos(theta),s=Math.sin(theta);
+      const wave=Math.sin(theta-phase)*.58+Math.sin(theta*2-phase*1.13)*.29+Math.sin(theta*4-phase*.91)*.13;
+      const secondary=Math.sin(theta*2+u.uTime.value*.31+u.uOffset.value*5.3)*.44
+        +Math.sin(theta*3-u.uTime.value*.19+u.uOffset.value*2.1)*.31;
+      const irregular=Math.sin(theta+u.uTime.value*.41+u.uOffset.value*8.)*.56
+        +Math.sin(theta*2-u.uTime.value*.23+u.uOffset.value*3.)*.29
+        +Math.sin(theta*3+u.uTime.value*.13+u.uOffset.value*11.)*.15;
+      const width=Math.max(.7,1+u.uWidthVariation.value*irregular+wave*u.uWaveAmplitude.value*1.42);
+      const x=(base[p]-ribbon.radius*c)*width,y=(base[p+1]-ribbon.radius*s)*width,z=base[p+2]*width;
+      const radial=u.uDeformation.value*(secondary*.28+Math.sin(theta-u.uTime.value*.17+u.uOffset.value)*.12)
+        +wave*u.uWaveAmplitude.value*.26;
+      const hillClock=u.uTime.value*(.64+u.uOffset.value*.17);
+      const hillA=Math.pow(.5+.5*Math.sin(theta*5-hillClock
+        +Math.sin(theta*2+hillClock*.37+u.uOffset.value*8)*1.25),4);
+      const hillB=Math.pow(.5+.5*Math.sin(theta*7+hillClock*.71+u.uOffset.value*13),3);
+      const livingRelief=(hillA*.9-hillB*.3+Math.sin(theta*11-hillClock*1.17)*.08)
+        *ribbon.radius*u.uReliefRatio.value*u.uReliefActivity.value*u.uWorkRelief.value;
+      positions.setXYZ(i,
+        ribbon.radius*c+x+c*radial+normals.getX(i)*livingRelief,
+        ribbon.radius*s+y+s*radial+normals.getY(i)*livingRelief,
+        z+u.uDeformation.value*Math.sin(theta*2-u.uTime.value*.21+u.uOffset.value*9.)*(.45+u.uEnergy.value*.85)
+        +wave*u.uWaveAmplitude.value*Math.max(0,(u.uEnergy.value-.62)/.38)*1.35
+        +normals.getZ(i)*livingRelief,
+      );
+    }
+    positions.needsUpdate=true;
+  }
+
   update(dt:number,time:number){
     this.blendState(dt);
-    // CALM sphere <-> WORK chaos. The same blend removes all global size
-    // breathing after WORK has completely formed.
+    // CALM and WORK are the same chaotic matter at different scales/speeds.
+    // Keeping one representation removes the old sphere-over-chaos crossfade.
     this.workCoreChaos=damp(this.workCoreChaos,this.state==='work'?1:0,dt,2.8);
+    this.workRibbonRelief=damp(this.workRibbonRelief,
+      this.state==='work'&&this.workRibbonReliefEnabled?1:0,dt,3.2);
+    this.livingChaosMix=damp(this.livingChaosMix,this.livingChaosEnabled?1:0,dt,4.2);
+    const stableChaosTarget=this.state==='calm'||this.state==='work'?1:0;
+    this.stableChaosPresence=damp(this.stableChaosPresence,stableChaosTarget,dt,4.8);
+    this.coreChaosSpeed=damp(this.coreChaosSpeed,this.state==='calm'?1/3:1,dt,3.6);
+    const controlledChaosStep=dt*this.coreChaosSpeed*this.chaosSpeedControl;
+    this.coreChaosTime+=controlledChaosStep;
+    this.chaosLayerTimes[0]+=controlledChaosStep*.82;
+    this.chaosLayerTimes[1]+=controlledChaosStep*1.19;
     this.errorStructure=damp(this.errorStructure,
       this.state==='error'||this.state==='critical'?1:0,dt,CONFIG.STATE_TRANSITION_SPEED);
     const phaseError=this.errorDirector.update(dt,this.current.glitch);
@@ -395,41 +552,36 @@ export class CoreVisual{
     const fixedCoreScale=STATE_TUNING.error.coreScale;
     const coreScale=THREE.MathUtils.lerp(morphedCoreScale,fixedCoreScale,containment);
     this.core.scale.setScalar(coreScale);
-    this.coreUniforms.uVisibility.value=1-this.workCoreChaos;
+    this.coreUniforms.uVisibility.value=1-this.stableChaosPresence;
     const dynamicCoreX=Math.sin(time*.19)*.075+Math.sin(time*.071)*.025;
     this.core.rotation.x=THREE.MathUtils.lerp(dynamicCoreX,this.frozenCoreRotation.x,containment);
     this.core.rotation.y=THREE.MathUtils.lerp(this.coreRotation,this.frozenCoreRotation.y,containment);
     this.core.rotation.z=THREE.MathUtils.lerp(0,this.frozenCoreRotation.z,containment);
 
-    this.containmentUniforms.uTime.value=time;
-    this.containmentUniforms.uIntensity.value=Math.max(
-      containment,critical.coreOverload*.72,this.workCoreChaos,
-    );
-    this.coreChaosUniforms.uTime.value=time;
+    const chaosIntensity=Math.max(containment,critical.coreOverload*.72,this.stableChaosPresence);
+    this.containmentUniforms.forEach((uniforms,index)=>{
+      uniforms.uTime.value=this.chaosLayerTimes[index];
+      uniforms.uIntensity.value=chaosIntensity;
+      uniforms.uSeed.value=this.errorSignals.seed+(index===0?.17:.73);
+      uniforms.uLiving.value=this.livingChaosMix;
+    });
+    this.coreChaosUniforms.uTime.value=this.coreChaosTime;
     const faultDigits=Math.max(containment,critical.coreOverload*.72);
-    // In stable WORK the free outer particle layer stays hidden. During the
-    // CALM <-> WORK morph these same digits visibly travel between their
-    // chaotic volume and ordered spherical positions before handing off to
-    // the core's dense surface grid.
-    const morphDigitVisibility=Math.pow(
-      Math.max(0,Math.sin(this.workCoreChaos*Math.PI)),.62,
-    )*.88;
-    this.coreChaosUniforms.uIntensity.value=Math.max(faultDigits,this.workCoreChaos);
-    this.coreChaosUniforms.uVisibility.value=Math.max(faultDigits,morphDigitVisibility);
-    this.containmentUniforms.uSeed.value=this.errorSignals.seed;
+    // The outer free-particle layer is reserved for faults. CALM <-> WORK only
+    // changes speed and scale, so no transient spherical shell can appear.
+    this.coreChaosUniforms.uIntensity.value=Math.max(faultDigits,this.stableChaosPresence);
+    this.coreChaosUniforms.uVisibility.value=faultDigits;
     this.containmentChaos.scale.setScalar(coreScale);
-    this.containmentChaos.rotation.set(time*3.7,time*-5.1,time*2.3);
+    this.containmentChaos.rotation.set(0,0,0);
+    const outerChaos=this.containmentChaos.children[0];
     const innerChaos=this.containmentChaos.children[1];
-    innerChaos.rotation.set(time*-7.2,time*4.6,time*8.4);
-
-    const haloMaterial=this.halo.material as THREE.SpriteMaterial;
-    const haloOpacity=THREE.MathUtils.lerp(this.current.glow,.075,containment);
-    haloMaterial.opacity=damp(haloMaterial.opacity,haloOpacity,dt,1.8);
-    const dynamicHaloScale=(2.72+coreBreath*.9+this.current.energy*.08)*this.current.coreScale*absorption;
-    const stableWorkHalo=2.72*workStableScale;
-    const morphedHaloScale=THREE.MathUtils.lerp(dynamicHaloScale,stableWorkHalo,this.workCoreChaos);
-    const haloScale=THREE.MathUtils.lerp(morphedHaloScale,2.72*fixedCoreScale,containment);
-    this.halo.scale.set(haloScale,haloScale,1);
+    outerChaos.rotation.set(
+      this.chaosLayerTimes[0]*.63,this.chaosLayerTimes[0]*-.91,this.chaosLayerTimes[0]*.47,
+    );
+    innerChaos.rotation.set(
+      .7+this.chaosLayerTimes[1]*-1.08,.2+this.chaosLayerTimes[1]*.74,
+      .4+this.chaosLayerTimes[1]*1.21,
+    );
 
     const maxSafeScale=1+CONFIG.SAFE_RENDER_MARGIN*.22;
     const errorBaseScale=1-this.current.contraction;
@@ -501,6 +653,7 @@ export class CoreVisual{
       const desiredScale=THREE.MathUtils.lerp(activeScale,containedScale,containment);
       ribbon.group.scale.setScalar(THREE.MathUtils.clamp(desiredScale,.08,maxSafeScale));
       ribbon.mesh.position.z=Math.sin(time*.31+ribbon.phase)*(.018+this.current.deformation*.09)*(1-containment);
+      this.deformShadowSurface(ribbon);
       ribbon.ghosts.forEach(ghost=>{
         this.updateUniforms(ghost.uniforms,time-ghost.lag,
           this.organismWavePhase-ribbon.waveOffset+desyncPhase-ghost.lag*this.current.waveSpeed,
@@ -530,6 +683,7 @@ export class CoreVisual{
     this.root.position.x=THREE.MathUtils.lerp(0,this.frozenRootPosition.x,containment);
     this.root.position.y=THREE.MathUtils.lerp(dynamicRootYPosition,this.frozenRootPosition.y,containment);
     this.root.position.z=THREE.MathUtils.lerp(0,this.frozenRootPosition.z,containment);
+    this.updateLightRig();
     this.renderer.render(this.scene,this.camera);
   }
   dispose(){this.renderer.dispose();}
