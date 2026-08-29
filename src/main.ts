@@ -8,7 +8,7 @@ import {
   ALL_CRITICAL_DAMAGE_TYPES,type CriticalDamage,
 } from './critical-error-director';
 import { CoreStore,getVisualState } from './state';
-import { CoreVisual } from './visual';
+import { CoreVisual,type TerrainParameterKey,type VisualEntityKey } from './visual';
 
 const scene=document.querySelector<HTMLElement>('#scene')!;
 const app=document.querySelector<HTMLElement>('#app')!;
@@ -21,6 +21,11 @@ const ribbonReliefToggle=document.querySelector<HTMLButtonElement>('#ribbon-reli
 const ribbonRelief=document.querySelector<HTMLInputElement>('#ribbon-relief')!;
 const ribbonReliefValue=document.querySelector<HTMLOutputElement>('#ribbon-relief-value')!;
 const chaosLivingToggle=document.querySelector<HTMLButtonElement>('#chaos-living-toggle')!;
+const cubeControls=document.querySelector<HTMLElement>('#cube-controls')!;
+const cubeVioletBrightness=document.querySelector<HTMLInputElement>('#cube-violet-brightness')!;
+const cubeVioletBrightnessValue=document.querySelector<HTMLOutputElement>('#cube-violet-brightness-value')!;
+const cubeAmberBrightness=document.querySelector<HTMLInputElement>('#cube-amber-brightness')!;
+const cubeAmberBrightnessValue=document.querySelector<HTMLOutputElement>('#cube-amber-brightness-value')!;
 const store=new CoreStore();
 const visual=new CoreVisual(scene);
 let lastRibbonReliefPercent=50;
@@ -29,6 +34,8 @@ let demoTimer=0;
 let autoIntegration=true;
 let criticalDamageIndex=-1;
 let lastArrowSwitch=0;
+const transitionSpeeds=[.2,.5,1] as const;
+let transitionSpeedIndex=2;
 
 const damageLabel=(damage:CriticalDamage)=>damage.replace(/[A-Z]/g,letter=>`_${letter}`).toUpperCase();
 const damageNumber=(damage:CriticalDamage)=>ALL_CRITICAL_DAMAGE_TYPES.indexOf(damage)+1;
@@ -57,6 +64,7 @@ store.subscribe(snapshot=>{
   fields.errors.textContent=String(snapshot.errors);
   hud.classList.toggle('visible',snapshot.hovered||hudPinned);
   chaosControls.classList.toggle('visible',visualState==='calm'||visualState==='work');
+  cubeControls.classList.toggle('visible',visualState==='cube');
   document.body.dataset.state=snapshot.state;
 });
 
@@ -96,6 +104,18 @@ chaosLivingToggle.addEventListener('click',()=>{
   visual.setLivingChaos(enabled);
 });
 
+cubeVioletBrightness.addEventListener('input',()=>{
+  const percent=Number(cubeVioletBrightness.value);
+  cubeVioletBrightnessValue.value=`${percent}%`;
+  visual.setCubeVioletBrightness(percent/100);
+});
+
+cubeAmberBrightness.addEventListener('input',()=>{
+  const percent=Number(cubeAmberBrightness.value);
+  cubeAmberBrightnessValue.value=`${percent}%`;
+  visual.setCubeAmberBrightness(percent/100);
+});
+
 const activity=new CodexActivityInterpreter({
   onWorking:()=>store.dispatch({type:'WORKING_STARTED',source:'codex-live'}),
   onSuccess:()=>store.dispatch({type:'WORKING_COMPLETED'}),
@@ -111,6 +131,8 @@ function setSimulatedState(number:number){
   if(number===3)store.dispatch({type:'ERROR_RAISED'});
   if(number===4)store.dispatch({type:'CRITICAL_ERROR_RAISED'});
   if(number===5)store.dispatch({type:'CRITICAL2_ERROR_RAISED'});
+  if(number===6)store.dispatch({type:'CUBE_MODE'});
+  if(number===7)store.dispatch({type:'TERRAIN_MODE'});
 }
 
 function enterManualMode(){
@@ -120,7 +142,7 @@ function enterManualMode(){
 }
 
 const handleKeyDown=(event:KeyboardEvent)=>{
-  if(/^[1-5]$/.test(event.key)){
+  if(/^[1-7]$/.test(event.key)){
     enterManualMode();
     criticalDamageIndex=-1;
     visual.clearCriticalDamagePreview();
@@ -159,10 +181,35 @@ const handleKeyDown=(event:KeyboardEvent)=>{
     autoIntegration=!autoIntegration;
     activity.reset(autoIntegration);
   }
+  if((event.code==='ArrowDown'||event.code==='ArrowUp')
+    &&!(event.target instanceof HTMLInputElement)){
+    const direction=event.code==='ArrowDown'?-1:1;
+    transitionSpeedIndex=Math.max(0,Math.min(transitionSpeeds.length-1,transitionSpeedIndex+direction));
+    const speed=transitionSpeeds[transitionSpeedIndex];
+    visual.setCubeTransitionTimeScale(speed);
+    fields.source.textContent=`topology-transition · ${speed}x`;
+    event.preventDefault();
+  }
 };
 
-type CoreWindow=Window&{__coreKeyHandler?:((event:KeyboardEvent)=>void)};
+type CoreWindow=Window&{
+  __coreKeyHandler?:((event:KeyboardEvent)=>void);
+  __coreVisualDebug?:{
+    setLayer:(entity:VisualEntityKey,enabled:boolean)=>void;
+    setTransitionSpeed:(value:number)=>void;
+    getPhase:()=>string;
+    setTerrainParameter:(key:TerrainParameterKey,value:number)=>void;
+    getTerrainParameters:()=>Readonly<Record<TerrainParameterKey,number>>;
+  };
+};
 const coreWindow=window as CoreWindow;
+coreWindow.__coreVisualDebug={
+  setLayer:(entity,enabled)=>visual.setVisualEntityDebug(entity,enabled),
+  setTransitionSpeed:value=>visual.setCubeTransitionTimeScale(value),
+  getPhase:()=>visual.getCubeTransitionPhase(),
+  setTerrainParameter:(key,value)=>visual.setTerrainParameter(key,value),
+  getTerrainParameters:()=>visual.getTerrainParameters(),
+};
 if(coreWindow.__coreKeyHandler)removeEventListener('keydown',coreWindow.__coreKeyHandler);
 coreWindow.__coreKeyHandler=handleKeyDown;
 addEventListener('keydown',handleKeyDown);

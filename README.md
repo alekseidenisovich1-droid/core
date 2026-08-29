@@ -39,12 +39,21 @@ npm.cmd run tauri build
 | `3` | ERROR / full phase sequence ending in static containment |
 | `4` | CRITICAL / ten failures on ERROR geometry and coarse binary grid |
 | `5` | CRITICAL 2 / ten failures on CALM geometry and dense binary grid |
+| `6` | CUBE DEV / computational lattice topology; existing states are preserved |
+| `7` | LIVING BINARY TERRAIN / GPU height-field topology |
+| `↓` / `↑` | decrease/increase topology transition speed: 0.2×, 0.5×, 1× |
 | `→` / `←` | inspect ten damage modules; in ERROR this pauses the automatic scenario and prevents containment |
 | `H` | pin/unpin HUD |
 | `D` | automatically cycle all states |
 | `A` | toggle automatic Codex process monitoring |
 
 Hover over CORE to reveal the HUD. Drag the invisible strip at the top center to move the native window.
+
+`6` is reached through a 5.2-second matter transition from every other state: the active form is first contained as a compact chaos core, then binary matter aligns into locally staggered 8×8×8 computational cells. The lattice is 30% smaller than the former 10×10×10 form. The cube crystallizes from its centre and drains the chaos reservoir as its independent internal amber and violet lights take over; their brightness can be adjusted from 0–200% in the CUBE control panel. Leaving CUBE runs the same conserved path in reverse: cells collect into the seed, the seed becomes the compact kernel, and the target state's ribbons are released from it.
+
+Cube entry has explicit renderer ownership phases: `convergeToError → kernelHold → morphToSeed → seedOnly → expand → idle`. Reverse ownership is `collapseCube → reverseSeedOnly → seedToKernel → reverseKernelHold → releaseRibbons`. During either seed-only handoff, old and new renderers cannot overlap. Development inspection is available through `window.__coreVisualDebug`: `getPhase()`, `setTransitionSpeed(1 | .5 | .2)` and `setLayer(entity, enabled)` for `ribbons`, `kernel`, `chaos`, `seedCube`, `cubeCells`, and `cubeLight`.
+
+`7` reorganizes the binary matter as a 128×76 instanced height field. Macro 3D noise, five warped non-parallel interference components, three evolving local pressure systems, local normals, long-lived bit values, irregular edge dissolution and distance attenuation run in the vertex shader. Entry is a 2.2-second overlapping topology morph: ribbons, Kernel and Chaos flatten into the horizontal field while its positive and negative relief is already erupting. TERRAIN uses a low state camera looking across the world-horizontal field rather than rotating it into an isometric view. The palette is graphite, smoked silver, warm ivory, restrained amber and rare vermilion. Runtime tuning is available through `window.__coreVisualDebug.getTerrainParameters()` and `setTerrainParameter(name, value)`.
 
 ## Architecture
 

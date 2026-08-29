@@ -52,6 +52,24 @@ export const CONFIG = {
     chaosSpeedMax: 1.4,
     // Local hill height is proportional to the current Möbius radius.
     ribbonReliefRadiusRatio: .11,
+    // 8 cells per axis. The .207/.062 pitch keeps the complete lattice about
+    // 30% smaller than the former 10 x 10 x 10, 2.98-unit cube.
+    cubeCellsPerAxis: 8,
+    cubeCellSize: .207,
+    cubeCellGap: .062,
+    cubeTransitionSeconds: 5.2,
+    cubeCoreGatherSeconds: 1.2,
+    cubeCoreHoldSeconds: .5,
+    cubeSeedMorphSeconds: 1.1,
+    cubeSeedOnlySeconds: .25,
+    cubeTransitionTimeScale: 1,
+    cubeFragmentPeriod: 18,
+    cubeFragmentDuration: 1.7,
+    terrainColumns: 128,
+    terrainRows: 76,
+    terrainWidth: 7.4,
+    terrainDepth: 5.2,
+    terrainTransitionSeconds: 2.2,
   },
 } as const;
 
@@ -97,5 +115,19 @@ export const STATE_TUNING: Record<VisualState,StateTuning> = {
     waveSpeed:CONFIG.CALM_WAVE_SPEED,waveComplexity:0,waveAmplitude:CONFIG.CALM_WAVE_AMPLITUDE,
     digitScale:1,digitDensity:1,gradientSpeed:.03,rewriteSpeed:.48,
     corePulse:.045,coreScale:.667,glow:.095,
+  },
+  cube: {
+    orbitSpeed:.18,contraction:.333,openness:0,energy:.74,glitch:0,
+    widthVariation:.105,deformation:.075,twist:.065,selfRotation:.085,
+    waveSpeed:CONFIG.CALM_WAVE_SPEED,waveComplexity:0,waveAmplitude:CONFIG.CALM_WAVE_AMPLITUDE,
+    digitScale:1,digitDensity:1,gradientSpeed:.03,rewriteSpeed:.48,
+    corePulse:.02,coreScale:1,glow:.11,
+  },
+  terrain: {
+    orbitSpeed:.08,contraction:0,openness:0,energy:.56,glitch:0,
+    widthVariation:.08,deformation:.04,twist:.03,selfRotation:.04,
+    waveSpeed:CONFIG.CALM_WAVE_SPEED,waveComplexity:0,waveAmplitude:CONFIG.CALM_WAVE_AMPLITUDE,
+    digitScale:1,digitDensity:1,gradientSpeed:.018,rewriteSpeed:.2,
+    corePulse:.015,coreScale:1,glow:.08,
   },
 };

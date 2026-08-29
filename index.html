@@ -27,7 +27,13 @@
         <input id="ribbon-relief" type="range" min="0" max="100" value="50" step="1" />
         <button id="chaos-living-toggle" type="button" aria-pressed="true">CHAOS · ON</button>
       </section>
-      <div id="hint">3 ERROR · 4 CRITICAL · 5 CRITICAL 2 · ←/→ effects · A live</div>
+      <section id="cube-controls" aria-label="Cube light controls">
+        <label for="cube-violet-brightness">VIOLET <output id="cube-violet-brightness-value">100%</output></label>
+        <input id="cube-violet-brightness" type="range" min="0" max="200" value="100" step="1" />
+        <label for="cube-amber-brightness">AMBER <output id="cube-amber-brightness-value">100%</output></label>
+        <input id="cube-amber-brightness" type="range" min="0" max="200" value="100" step="1" />
+      </section>
+      <div id="hint">6 CUBE · 7 LIVING TERRAIN · ↓/↑ transition speed · 3 ERROR · 4 CRITICAL · 5 CRITICAL 2 · ←/→ effects</div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
