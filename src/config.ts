@@ -57,12 +57,6 @@ export const CONFIG = {
     cubeCellsPerAxis: 8,
     cubeCellSize: .207,
     cubeCellGap: .062,
-    cubeTransitionSeconds: 5.2,
-    cubeCoreGatherSeconds: 1.2,
-    cubeCoreHoldSeconds: .5,
-    cubeSeedMorphSeconds: 1.1,
-    cubeSeedOnlySeconds: .25,
-    cubeTransitionTimeScale: 1,
     cubeFragmentPeriod: 18,
     cubeFragmentDuration: 1.7,
     // The simulation domain deliberately extends well beyond the visible
@@ -72,69 +66,71 @@ export const CONFIG = {
     terrainRows: 180,
     terrainWidth: 14,
     terrainDepth: 6,
-    terrainTransitionSeconds: 3.1,
-    terrainCoreGatherSeconds: 1.2,
-    terrainSourceHoldSeconds: .5,
-    terrainCoreMorphSeconds: .9,
-    terrainTargetReleaseSeconds: 1.2,
   },
 } as const;
 
+export const TRANSITION_TUNING={
+  timeScaleDefault:1,
+  cube:{totalSeconds:5.2,coreGatherSeconds:1.2,coreHoldSeconds:.5,seedMorphSeconds:1.1,seedOnlySeconds:.25},
+  terrain:{formationSeconds:3.1,coreGatherSeconds:1.2,sourceHoldSeconds:.5,
+    paletteHandoffSeconds:.9,targetReleaseSeconds:1.2},
+} as const;
+
 export interface StateTuning {
-  orbitSpeed:number; contraction:number; openness:number; energy:number; glitch:number;
+  orbitSpeed:number; contraction:number; energy:number; glitch:number;
   widthVariation:number; deformation:number; twist:number; selfRotation:number;
   waveSpeed:number; waveComplexity:number; waveAmplitude:number;
   digitScale:number; digitDensity:number; gradientSpeed:number; rewriteSpeed:number;
-  corePulse:number; coreScale:number; glow:number;
+  corePulse:number; coreScale:number;
 }
 
 export const STATE_TUNING: Record<VisualState,StateTuning> = {
   calm: {
-    orbitSpeed:.38,contraction:.333,openness:0,energy:.46,glitch:0,
+    orbitSpeed:.38,contraction:.333,energy:.46,glitch:0,
     widthVariation:.105,deformation:.075,twist:.065,selfRotation:.085,
     waveSpeed:CONFIG.CALM_WAVE_SPEED,waveComplexity:0,waveAmplitude:CONFIG.CALM_WAVE_AMPLITUDE,
-    digitScale:1,digitDensity:1,gradientSpeed:.03,rewriteSpeed:.48,corePulse:.045,coreScale:1,glow:.095,
+    digitScale:1,digitDensity:1,gradientSpeed:.03,rewriteSpeed:.48,corePulse:.045,coreScale:1,
   },
   work: {
-    orbitSpeed:4.05,contraction:.5,openness:0,energy:1.04,glitch:0,
+    orbitSpeed:4.05,contraction:.5,energy:1.04,glitch:0,
     widthVariation:.26,deformation:.21,twist:.18,selfRotation:1.08,
     waveSpeed:4.95,waveComplexity:.68,waveAmplitude:.18,
     digitScale:1.12,digitDensity:1.1,gradientSpeed:.48,rewriteSpeed:6.3,
-    corePulse:.09,coreScale:.667,glow:.155,
+    corePulse:.09,coreScale:.667,
   },
   error: {
-    orbitSpeed:1.92,contraction:.333,openness:0,energy:1.3,glitch:1,
+    orbitSpeed:1.92,contraction:.333,energy:1.3,glitch:1,
     widthVariation:.30,deformation:.25,twist:.30,selfRotation:.58,
     waveSpeed:CONFIG.ERROR_WAVE_SPEED,waveComplexity:1,waveAmplitude:CONFIG.ERROR_WAVE_AMPLITUDE,
     digitScale:1.2,digitDensity:1,gradientSpeed:.09,rewriteSpeed:2.6,
-    corePulse:.12,coreScale:.667,glow:.19,
+    corePulse:.12,coreScale:.667,
   },
   critical: {
-    orbitSpeed:1.92,contraction:.333,openness:0,energy:1.3,glitch:1,
+    orbitSpeed:1.92,contraction:.333,energy:1.3,glitch:1,
     widthVariation:.30,deformation:.25,twist:.30,selfRotation:.58,
     waveSpeed:CONFIG.ERROR_WAVE_SPEED,waveComplexity:1,waveAmplitude:CONFIG.ERROR_WAVE_AMPLITUDE,
     digitScale:1.2,digitDensity:1,gradientSpeed:.09,rewriteSpeed:2.6,
-    corePulse:.12,coreScale:.667,glow:.19,
+    corePulse:.12,coreScale:.667,
   },
   critical2: {
-    orbitSpeed:.38,contraction:0,openness:0,energy:.46,glitch:1,
+    orbitSpeed:.38,contraction:0,energy:.46,glitch:1,
     widthVariation:.105,deformation:.075,twist:.065,selfRotation:.085,
     waveSpeed:CONFIG.CALM_WAVE_SPEED,waveComplexity:0,waveAmplitude:CONFIG.CALM_WAVE_AMPLITUDE,
     digitScale:1,digitDensity:1,gradientSpeed:.03,rewriteSpeed:.48,
-    corePulse:.045,coreScale:.667,glow:.095,
+    corePulse:.045,coreScale:.667,
   },
   cube: {
-    orbitSpeed:.18,contraction:.333,openness:0,energy:.74,glitch:0,
+    orbitSpeed:.18,contraction:.333,energy:.74,glitch:0,
     widthVariation:.105,deformation:.075,twist:.065,selfRotation:.085,
     waveSpeed:CONFIG.CALM_WAVE_SPEED,waveComplexity:0,waveAmplitude:CONFIG.CALM_WAVE_AMPLITUDE,
     digitScale:1,digitDensity:1,gradientSpeed:.03,rewriteSpeed:.48,
-    corePulse:.02,coreScale:1,glow:.11,
+    corePulse:.02,coreScale:1,
   },
   terrain: {
-    orbitSpeed:.08,contraction:0,openness:0,energy:.56,glitch:0,
+    orbitSpeed:.08,contraction:0,energy:.56,glitch:0,
     widthVariation:.08,deformation:.04,twist:.03,selfRotation:.04,
     waveSpeed:CONFIG.CALM_WAVE_SPEED,waveComplexity:0,waveAmplitude:CONFIG.CALM_WAVE_AMPLITUDE,
     digitScale:1,digitDensity:1,gradientSpeed:.018,rewriteSpeed:.2,
-    corePulse:.015,coreScale:1,glow:.08,
+    corePulse:.015,coreScale:1,
   },
 };

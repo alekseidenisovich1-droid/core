@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:architecture": "node scripts/verify-transitions.mjs",
+    "test:transitions": "node scripts/transition-matrix.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

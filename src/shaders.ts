@@ -2,7 +2,7 @@ export const vertexShader=/* glsl */`
   uniform float uTime,uEnergy,uGlitch,uMobius,uOffset,uRibbonRadius;
   uniform float uWavePhase,uWaveAmplitude,uWaveComplexity,uDeformation,uWidthVariation,uTwist;
   uniform float uErrorDistort,uErrorTear,uErrorCollapse,uErrorEject,uErrorContainment,uErrorJerk,uErrorSeed;
-  uniform float uGeometryDamage,uReliefActivity,uWorkRelief,uReliefRatio,uTerrainMorph;
+  uniform float uGeometryDamage,uReliefActivity,uWorkRelief,uReliefRatio;
   uniform float uRibbonAbsorption,uRibbonAbsorptionAnchor;
   varying vec2 vUv;
   varying vec3 vPos,vNormal;
@@ -93,15 +93,6 @@ export const vertexShader=/* glsl */`
       *step(.05,sin(surfaceU*50.265482+floor(brokenClock*10.0)*1.7));
     p+=normal*(rupture+brokenWave*uGlitch*(1.-uErrorContainment)*.085);
     p.z+=brokenWave*uGlitch*(1.-uErrorContainment)*.065;
-    // All legacy topologies converge on the future TERRAIN plane. Ribbons
-    // flatten and spread laterally; Kernel matter expands from its compact
-    // volume. The field begins appearing before this projection completes.
-    float terrainLocal=smoothstep(.02,.98,uTerrainMorph
-      +(sin(surfaceU*31.416+uOffset*19.)*.5+.5-.5)*.055);
-    vec3 terrainPlane=uMobius>.5
-      ?vec3(p.x*1.18+sin(surfaceU*18.85+uOffset*11.)*.28,0.,p.y*.72+(uOffset-.23)*4.2)
-      :vec3(p.x*3.6,0.,p.y*2.8+p.z*1.7);
-    p=mix(p,terrainPlane,terrainLocal);
     vPos=p;
     vec4 mvPosition=modelViewMatrix*vec4(p,1.0);
     vViewDepth=-mvPosition.z;
@@ -261,7 +252,7 @@ export const particleVertexShader=/* glsl */`
 `;
 
 export const containmentVertexShader=/* glsl */`
-  uniform float uTime,uIntensity,uSeed,uLayer,uLiving,uCompression,uSeedMorph,uTerrainMorph,uFillProgress;
+  uniform float uTime,uIntensity,uSeed,uLayer,uLiving,uCompression,uSeedMorph,uFillProgress;
   uniform vec3 uSeedCenter;
   varying vec3 vObjectPos,vNormal;
   varying float vPressure;
@@ -305,8 +296,6 @@ export const containmentVertexShader=/* glsl */`
     // uniform scale while all vertices still converge on the same seed cell.
     float localMorph=smoothstep(.02,.98,uSeedMorph+activeField*.035);
     vec3 p=mix(compressed,cubeSurface,localMorph);
-    vec3 terrainPlane=vec3(p.x*4.1,0.,p.y*2.7+p.z*2.2);
-    p=mix(p,terrainPlane,smoothstep(.02,.98,uTerrainMorph+activeField*.035));
     vObjectPos=p;vNormal=normalize(normalMatrix*normal);
     gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);
   }
@@ -355,7 +344,7 @@ export const containmentFragmentShader=/* glsl */`
 
 export const coreChaosVertexShader=/* glsl */`
   attribute float aSeed;
-  uniform float uTime,uIntensity,uVisibility,uPixelRatio,uCompression,uSeedMorph,uTerrainMorph,uFillProgress;
+  uniform float uTime,uIntensity,uVisibility,uPixelRatio,uCompression,uSeedMorph,uFillProgress;
   uniform float uTransitionWarm;
   uniform vec3 uSeedCenter;
   varying float vAlpha,vBit,vHue;
@@ -383,8 +372,6 @@ export const coreChaosVertexShader=/* glsl */`
     vec3 cubeVolume=uSeedCenter+cubeDirection/max(maxAxis,.001)*(.105*radialDensity);
     float localMorph=smoothstep(.04,.96,uSeedMorph+(random-.5)*.12);
     p=mix(p,cubeVolume,localMorph);
-    vec3 terrainPlane=vec3(p.x*4.2,0.,p.y*2.9+p.z*2.1);
-    p=mix(p,terrainPlane,smoothstep(.03,.97,uTerrainMorph+(random-.5)*.08));
     vec4 mv=modelViewMatrix*vec4(p,1.);
     gl_Position=projectionMatrix*mv;
     gl_PointSize=(2.5+random*2.8+burst*2.)*(1.+uCompression*.42)*uPixelRatio

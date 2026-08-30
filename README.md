@@ -30,6 +30,21 @@ npm.cmd run build
 npm.cmd run tauri build
 ```
 
+Architecture and regression references:
+
+- `AGENTS.md` — mandatory engineering workflow;
+- `docs/ARCHITECTURE.md` — current runtime boundaries and update flow;
+- `docs/STATE_GRAPH.md` and `docs/TRANSITION_CONTRACTS.md` — stable states and reusable transition primitives;
+- `docs/VISUAL_OWNERSHIP.md` — authoritative entity ownership;
+- `docs/BEHAVIOR_BASELINE.md` — current native regression record.
+
+Architecture checks:
+
+```powershell
+npm.cmd run test:architecture
+npm.cmd run test:transitions
+```
+
 ## Simulation controls
 
 | Key | Action |

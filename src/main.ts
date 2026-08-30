@@ -9,6 +9,7 @@ import {
 } from './critical-error-director';
 import { CoreStore,getVisualState } from './state';
 import { CoreVisual,type TerrainParameterKey,type VisualEntityKey } from './visual';
+import type { TransitionDebugSnapshot } from './transition-debug';
 
 const scene=document.querySelector<HTMLElement>('#scene')!;
 const app=document.querySelector<HTMLElement>('#app')!;
@@ -199,7 +200,7 @@ type CoreWindow=Window&{
     setTransitionSpeed:(value:number)=>void;
     getPhase:()=>string;
     getTerrainPhase:()=>string;
-    getTransitionDebug:()=>Readonly<Record<string,unknown>>;
+    getTransitionDebug:()=>Readonly<TransitionDebugSnapshot>;
     setTerrainParameter:(key:TerrainParameterKey,value:number)=>void;
     getTerrainParameters:()=>Readonly<Record<TerrainParameterKey,number>>;
   };

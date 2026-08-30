@@ -20,6 +20,13 @@ export interface CriticalSignals {
   seed:number;
 }
 
+export interface CriticalDirectorStatus {
+  readonly requested:boolean;
+  readonly recovering:boolean;
+  readonly stage:CriticalStage;
+  readonly activity:number;
+}
+
 export const ALL_CRITICAL_DAMAGE_TYPES=[
   'timeDesync','frameSkip','ghost','missingData','binaryEjection','binaryAttraction',
   'gradientDamage','geometryDamage','coreAbsorption','coreOverload',
@@ -91,6 +98,29 @@ export class CriticalErrorDirector {
     this.signals.affectedRibbon=Math.floor(Math.random()*3);
     this.signals.seed=Math.random()*113;
     this.chooseRibbonTiming();
+  }
+
+  getStatus():CriticalDirectorStatus{
+    const activity=Math.max(
+      this.signals.severity,this.signals.recovery,this.signals.containment,
+      ...DAMAGE_KEYS.map(key=>this.signals[key]),
+    );
+    return{
+      requested:this.requested,
+      recovering:!this.requested&&this.stage==='recovery'&&activity>.002,
+      stage:this.stage,activity,
+    };
+  }
+
+  stopImmediately(){
+    this.requested=false;this.damagePreview=null;this.stage='recovery';
+    this.stageElapsed=this.stageDuration;this.targets=blankTargets();
+    this.ribbonRateTargets=[1,1,1];
+    this.signals.severity=0;this.signals.recovery=0;this.signals.containment=0;
+    this.signals.previewMode=0;
+    for(const key of DAMAGE_KEYS)this.signals[key]=0;
+    const rates=this.signals.ribbonRates as [number,number,number];
+    rates[0]=1;rates[1]=1;rates[2]=1;
   }
 
   update(dt:number,macroIntensity:number):Readonly<CriticalSignals>{

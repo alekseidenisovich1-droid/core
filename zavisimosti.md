@@ -1,6 +1,6 @@
 # CORE — зависимости визуала
 
-> Актуально для runtime-реализации после перестройки переходов TERRAIN.
+> Актуально для runtime-реализации после архитектурной стабилизации переходов и ownership от 2026-08-30.
 > Источник истины — фактически отрисованный результат, затем `src/visual.ts`, `src/shaders.ts` и `src/config.ts`.
 
 Документ написан в Markdown UTF-8 и пригоден для чтения ChatGPT. Здесь зафиксированы визуальные сущности, владельцы материи, формулы, переходы, конечные точки и защищённые инварианты.
@@ -41,7 +41,7 @@
 
 ## 2. Состояния и главный кадр
 
-`CoreVisual.update(dt)` обновляет Cube и Terrain directors, смешивает параметры состояния, вычисляет единственного владельца материи, передаёт GPU-uniforms, применяет жёсткие правила видимости и рендерит композицию.
+`TransitionController` отдельно хранит запрошенное и фактически установленное состояние, один активный transition primitive и типизированный handoff. `CoreVisual.update(dt)` обновляет локальные Cube/Terrain-фазы, получает единый `VisualOwnershipSnapshot`, передаёт GPU-uniforms, применяет visibility один раз и рендерит композицию.
 
 Клавиши `1…7` выбирают:
 
@@ -202,7 +202,7 @@ frontBand = exp(-(frontDistance²))
 
 ### `idle`
 
-Первый точный idle-кадр обнуляет все переходные слои. Видимы только Terrain points и необходимые свет/тень/post-processing. `getTransitionDebug().terrainIdleUnexpected` должен быть пустым.
+Первый точный idle-кадр обнуляет все переходные слои. Видимы только Terrain points и необходимые свет/тень/post-processing. `getTransitionDebug().invariantViolations` должен быть пустым.
 
 ## 9. CUBE → TERRAIN
 
@@ -238,9 +238,9 @@ TERRAIN
 
 Outer-to-center фронт потребляет Terrain. Точки фронта получают coherent amber/height impulse; позади него Terrain теряет ownership; `terrainRemaining ↓`, `chaosFillProgress ↑`. X/Z точек не меняются.
 
-### Тёплый CHAOS и `coreToChaos`
+### Тёплый CHAOS и `compactPaletteHandoff`
 
-В центре причинно материализуются две оболочки CHAOS, а не отдельное жёлтое пятно. Пока фронт собирается, оболочки используют graphite/amber-палитру Terrain. За `terrainCoreMorphSeconds = 0.9` палитра плавно возвращается к нативной для направлений 1–5. Геометрия всё время остаётся узнаваемым CHAOS.
+В центре причинно материализуются две оболочки CHAOS, а не отдельное жёлтое пятно. Пока фронт собирается, оболочки используют graphite/amber-палитру Terrain. За `TRANSITION_TUNING.terrain.paletteHandoffSeconds = 0.9` палитра плавно возвращается к нативной для направлений 1–5. Геометрия всё время остаётся узнаваемым CHAOS.
 
 ### `releaseTarget`
 
@@ -274,17 +274,18 @@ Legacy `containment` ERROR/Cube не используется как глоба�
 
 ## 13. Вращение и часы
 
-Топологические переходы не создают искусственную раскрутку:
+Топологические переходы не создают искусственную раскрутку. Часы, orientation и visibility разделены:
 
-- `lockTopologyRotation()` фиксирует quaternion `root` и Kernel;
-- при `convergeToError` и `releaseRibbons` ленты продолжают собственные заданные `orbitAngle` и `selfPhase`, пока видимая длина входит или выходит;
-- последний видимый quaternion сохраняется каждый кадр, а начало release мягко slerp-ится к текущей естественной траектории;
-- вне этих двух фаз ленты фиксируются без скрытого накопления;
+- `lockTransitionOrientations()` фиксирует quaternion `root` и Kernel, но не запрещает отдельно разрешённый clock лент;
+- при `ABSORB_CORE_TO_COMPACT` сохраняются исходные `orbitSpeed` и `selfRotation` режима 1–5: лента продолжает ту же орбиту вплоть до полного скрытия в CHAOS, а не замедляется до idle-скорости Cube;
+- при `RELEASE_COMPACT_TO_CORE` `orbitAngle` и `selfPhase` продолжаются и в скрытых reverse-фазах;
+- каждый кадр сохраняется именно живой quaternion этой траектории; при появлении ленты он применяется напрямую, без slerp к quaternion на старте Cube;
+- вне этих разрешённых операций ленты фиксируются без скрытого накопления;
 - Euler rewind и rotation catch-up отсутствуют;
 - `chaosLayerTimes` продолжают идти, когда CHAOS должен быть живым;
 - Cube вращается только в финальном `idle`.
 
-Разрешено естественное вращение лент по уже заданной траектории. Запрещено добавочное переходное вращение, доворачивание и скачок к накопленному углу.
+Разрешено естественное вращение лент по уже заданной траектории. При `ABSORB_CORE_TO_COMPACT` оно продолжается с захваченной исходной скоростью до полного поглощения. При `RELEASE_COMPACT_TO_CORE` clock и траектория продолжаются ещё на скрытых фазах, поэтому лента появляется уже на причинно продолженной орбите без скачка. Запрещены добавочное переходное вращение, Euler rewind, slerp к старому frozen quaternion и rotation catch-up.
 
 ## 14. Конечные точки
 
@@ -300,7 +301,7 @@ Legacy `containment` ERROR/Cube не используется как глоба�
 - `setSnapshot()` — инициирует topology change;
 - `createTerrainMatter()` — постоянная Terrain-сетка;
 - `updateTerrainTransition()` — все фазы входа/выхода Terrain;
-- `updateCubeMatter()` — принятая Cube-хореография;
+- `updateCubeMatter()` — принятая Cube-хореография; Cube seed намеренно не выводит `cubeGlyphs`, поэтому перед началом формирования не возникает самостоятельный слой 0/1;
 - `applyVisualOwnership()` — фазовая видимость и hard idle rule;
 - `deformShadowSurface()` — CPU-поверхность ленты, включая suction;
 - `getTransitionDebug()` — фаза, contributors и idle-аудит.
@@ -361,3 +362,14 @@ Legacy `containment` ERROR/Cube не используется как глоба�
 - pressure-волны читаются вдоль ±X;
 - финальные состояния остаются прежними;
 - `npm.cmd run build` проходит без ошибок.
+
+## 18. Архитектурные владельцы после стабилизации
+
+- `src/transition-controller.ts` — запрошенное/установленное состояние, один активный primitive, retarget и типизированный handoff;
+- `src/transition-primitives.ts` — нормализованные кривые и именованные lifecycle-пороги;
+- `src/visual-ownership.ts` — единственный lifecycle/visibility/clock-policy snapshot всех сущностей;
+- `src/transition-debug.ts` — скрытый inspector и development invariants;
+- `STATE_TUNING` содержит только параметры финальных состояний;
+- `TRANSITION_TUNING` содержит длительности переходов;
+- `applyVisualOwnership()` — единственное место runtime-записи `.visible`;
+- Terrain публикует handoff и не записывает Cube phase/progress, stable state или directors напрямую.

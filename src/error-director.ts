@@ -10,6 +10,13 @@ export interface ErrorSignals {
   seed:number;
 }
 
+export interface ErrorDirectorStatus {
+  readonly requested:boolean;
+  readonly recovering:boolean;
+  readonly phase:ErrorPhase;
+  readonly activity:number;
+}
+
 const smooth=(value:number,target:number,dt:number,rate=4.2)=>
   value+(target-value)*(1-Math.exp(-dt*rate));
 
@@ -47,6 +54,23 @@ export class ErrorDirector {
     this.manualOverride=active;
     if(active){this.recovering=false;this.elapsed=0;}
     else if(this.requested)this.startSequence();
+  }
+
+  getStatus():ErrorDirectorStatus{
+    return{
+      requested:this.requested,recovering:this.recovering,phase:this.phase,
+      activity:Math.max(
+        this.signals.distortion,this.signals.tear,this.signals.collapse,
+        this.signals.eject,this.signals.containment,Math.abs(this.signals.jerk),
+      ),
+    };
+  }
+
+  stopImmediately(){
+    this.requested=false;this.recovering=false;this.manualOverride=false;
+    this.elapsed=0;this.jerkTarget=0;
+    this.signals.distortion=0;this.signals.tear=0;this.signals.collapse=0;
+    this.signals.eject=0;this.signals.containment=0;this.signals.jerk=0;
   }
 
   update(dt:number,macroIntensity:number):Readonly<ErrorSignals>{
