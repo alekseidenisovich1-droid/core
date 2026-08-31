@@ -121,8 +121,11 @@ type LightingDebug=Record<LightingDebugKey,boolean>;
 
 type CorePaletteState={mix:number;activity:number;surface:THREE.Color;emitterColors:readonly number[]};
 const CORE_PALETTES:Record<VisualState,CorePaletteState>={
-  calm:{mix:1,activity:.22,surface:new THREE.Color(0x100d17),emitterColors:[0x22162f,0x3b2458,0x1a1720,0x9d632b]},
-  work:{mix:1,activity:.84,surface:new THREE.Color(0x15101c),emitterColors:[0x352047,0x5a3680,0x33221b,0xb87932]},
+  // States 1 and 2 retain the original CORE palette. The specialised
+  // graphite/violet/amber branch remains available to other topology work,
+  // but must not replace CALM/WORK's established pink/cyan/purple grammar.
+  calm:{mix:0,activity:0,surface:new THREE.Color(0x21172b),emitterColors:[0xff4fa3,0xc65cff,0xff78bc,0x9b67ff]},
+  work:{mix:0,activity:0,surface:new THREE.Color(0x21172b),emitterColors:[0xff4fa3,0xc65cff,0xff78bc,0x9b67ff]},
   error:{mix:0,activity:0,surface:new THREE.Color(0x21172b),emitterColors:[0xff4fa3,0xc65cff,0xff78bc,0x9b67ff]},
   critical:{mix:0,activity:0,surface:new THREE.Color(0x21172b),emitterColors:[0xff4fa3,0xc65cff,0xff78bc,0x9b67ff]},
   critical2:{mix:0,activity:0,surface:new THREE.Color(0x21172b),emitterColors:[0xff4fa3,0xc65cff,0xff78bc,0x9b67ff]},
