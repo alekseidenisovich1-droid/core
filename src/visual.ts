@@ -22,7 +22,8 @@ import {
 } from './transition-primitives';
 import {
   containmentFragmentShader,containmentVertexShader,coreChaosVertexShader,cubeGlyphFragmentShader,cubeGlyphVertexShader,fragmentShader,
-  particleFragmentShader,particleVertexShader,terrainFragmentShader,terrainVertexShader,vertexShader,
+  particleFragmentShader,particleVertexShader,ribbonBodyFragmentShader,ribbonBodyVertexShader,ribbonGhostBodyFragmentShader,
+  terrainFragmentShader,terrainVertexShader,vertexShader,
 } from './shaders';
 
 type Uniforms={
@@ -38,8 +39,14 @@ type Uniforms={
   uCorePalette:{value:number};uPaletteActivity:{value:number};
   uMissingData:{value:number};uGradientDamage:{value:number};uGeometryDamage:{value:number};
   uDepthFade:{value:number};
+  uRibbonInformation:{value:number};uGhost:{value:number};
   uRibbonAbsorption:{value:number};uRibbonAbsorptionAnchor:{value:number};
   uReliefActivity:{value:number};uWorkRelief:{value:number};uReliefRatio:{value:number};
+};
+type RibbonBodyUniforms={
+  uTime:{value:number};uEnergy:{value:number};uOffset:{value:number};
+  uGradientPhase:{value:number};uDigitPhase:{value:number};uVisibility:{value:number};
+  uAbsorption:{value:number};uOpacity:{value:number};
 };
 type ParticleUniforms={
   uTime:{value:number};uIntensity:{value:number};uTear:{value:number};
@@ -59,9 +66,10 @@ type CoreChaosUniforms={
 };
 type Ribbon={
   group:THREE.Group;mesh:THREE.Mesh;surface:THREE.Mesh;uniforms:Uniforms;baseRotation:THREE.Euler;
+  surfaceUniforms:RibbonBodyUniforms;
   surfaceGeometry:THREE.BufferGeometry;surfaceBasePositions:Float32Array;radius:number;
   particles:THREE.Points;particleUniforms:ParticleUniforms;
-  ghosts:{group:THREE.Group;mesh:THREE.Mesh;uniforms:Uniforms;lag:number}[];
+  ghosts:{group:THREE.Group;body:THREE.Mesh;mesh:THREE.Mesh;uniforms:Uniforms;lag:number}[];
   phase:number;orbitAngle:number;selfPhase:number;waveOffset:number;
   gradientPhase:number;digitPhase:number;
 };
@@ -149,6 +157,7 @@ function makeMaterial(offset:number,grid:THREE.Vector2,side:THREE.Side,mobius:nu
     uErrorContainment:{value:0},
     uErrorJerk:{value:0},uErrorSeed:{value:0},uVisibility:{value:1},uRgbSplit:{value:0},
     uSaturation:{value:1},uCorePalette:{value:1},uPaletteActivity:{value:.22},
+    uRibbonInformation:{value:mobius},uGhost:{value:0},
     uErrorStructure:{value:0},uMissingData:{value:0},uGradientDamage:{value:0},
     uGeometryDamage:{value:0},
     uDepthFade:{value:CONFIG.LIGHTING.depthFadeStrength},
@@ -163,15 +172,19 @@ function makeMaterial(offset:number,grid:THREE.Vector2,side:THREE.Side,mobius:nu
   return{material,uniforms};
 }
 
-// The dark physical skin writes real depth and both casts and receives soft
-// shadows. The existing digit shader stays above it as the emissive material.
-function makeSurfaceMaterial(){
-  return new THREE.MeshStandardMaterial({
-    color:0x21172b,emissive:0x210b2e,
-    emissiveIntensity:CONFIG.LIGHTING.ribbonEmission,
-    roughness:.64,metalness:.18,transparent:true,opacity:CONFIG.LIGHTING.surfaceOpacity,
-    side:THREE.DoubleSide,depthWrite:true,
-  });
+// The body shares the existing low-cost physical proxy with shadows and depth.
+// Glyphs remain a later draw, so information reads as embedded in the material.
+function makeSurfaceMaterial(offset:number){
+  const uniforms:RibbonBodyUniforms={
+    uTime:{value:0},uEnergy:{value:STATE_TUNING.calm.energy},uOffset:{value:offset},
+    uGradientPhase:{value:offset},uDigitPhase:{value:offset*3},uVisibility:{value:1},
+    uAbsorption:{value:0},uOpacity:{value:.76},
+  };
+  return{uniforms,material:new THREE.ShaderMaterial({
+    uniforms,vertexShader:ribbonBodyVertexShader,fragmentShader:ribbonBodyFragmentShader,
+    transparent:true,depthTest:true,depthWrite:true,side:THREE.DoubleSide,
+    blending:THREE.NormalBlending,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1,
+  })};
 }
 
 function mobiusPoint(u:number,v:number,radius:number,out:THREE.Vector3){
@@ -1319,7 +1332,8 @@ export class CoreVisual{
     const surfaceBasePositions=new Float32Array(
       (surfaceGeometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array,
     );
-    const surface=new THREE.Mesh(surfaceGeometry,makeSurfaceMaterial());
+    const body=makeSurfaceMaterial(index*.23);
+    const surface=new THREE.Mesh(surfaceGeometry,body.material);
     surface.castShadow=true;surface.receiveShadow=true;surface.renderOrder=3;
     const mesh=new THREE.Mesh(geometry,shader.material);mesh.renderOrder=4;
     const group=new THREE.Group();group.add(surface,mesh);
@@ -1331,15 +1345,22 @@ export class CoreVisual{
         CONFIG.RIBBON_DIGIT_GRID_Y/CONFIG.DIGIT_SIZE*CONFIG.DIGIT_DENSITY,
       ),THREE.DoubleSide,1,radius);
       ghostShader.uniforms.uVisibility.value=0;
+      ghostShader.uniforms.uGhost.value=1;
+      const ghostBody=new THREE.Mesh(geometry,new THREE.ShaderMaterial({
+        uniforms:ghostShader.uniforms,vertexShader,fragmentShader:ribbonGhostBodyFragmentShader,
+        transparent:true,depthWrite:false,depthTest:true,side:THREE.DoubleSide,
+        blending:THREE.NormalBlending,
+      }));
       const ghostMesh=new THREE.Mesh(geometry,ghostShader.material);ghostMesh.renderOrder=2;
-      const ghostGroup=new THREE.Group();ghostGroup.add(ghostMesh);this.root.add(ghostGroup);
-      return{group:ghostGroup,mesh:ghostMesh,uniforms:ghostShader.uniforms,lag};
+      ghostBody.renderOrder=1;
+      const ghostGroup=new THREE.Group();ghostGroup.add(ghostBody,ghostMesh);this.root.add(ghostGroup);
+      return{group:ghostGroup,body:ghostBody,mesh:ghostMesh,uniforms:ghostShader.uniforms,lag};
     });
     const rotations=[
       new THREE.Euler(.72,.08,.16),new THREE.Euler(-.48,.62,1.38),new THREE.Euler(.16,-.72,-.58),
     ];
     group.rotation.copy(rotations[index]);this.root.add(group);
-    return{group,mesh,surface,surfaceGeometry,surfaceBasePositions,radius,uniforms:shader.uniforms,particles:particleLayer.particles,ghosts,
+    return{group,mesh,surface,surfaceUniforms:body.uniforms,surfaceGeometry,surfaceBasePositions,radius,uniforms:shader.uniforms,particles:particleLayer.particles,ghosts,
       particleUniforms:particleLayer.particleUniforms,baseRotation:rotations[index],phase:index*2.137,
       orbitAngle:index*.43,selfPhase:index*1.71,waveOffset:index*.52,
       gradientPhase:index*.23,digitPhase:index*.71};
@@ -1445,12 +1466,7 @@ export class CoreVisual{
     });
     this.ribbons.forEach(ribbon=>{
       ribbon.surface.position.copy(ribbon.mesh.position);
-      const surfaceMaterial=ribbon.surface.material as THREE.MeshStandardMaterial;
-      surfaceMaterial.color.copy(this.corePaletteSurface);
-      surfaceMaterial.emissive.copy(this.corePaletteSurface).multiplyScalar(.72);
-      surfaceMaterial.opacity=CONFIG.LIGHTING.surfaceOpacity*(1-this.cubeMatter.presence);
-      surfaceMaterial.emissiveIntensity=debug.emissive
-        ?CONFIG.LIGHTING.ribbonEmission*(.62+this.current.energy*.28):0;
+      ribbon.surfaceUniforms.uOpacity.value=(debug.emissive?.76:.62)*(1-this.cubeMatter.presence);
     });
   }
 
@@ -1797,6 +1813,10 @@ export class CoreVisual{
       const desyncPhase=critical.timeDesync*localDamage*Math.sin(Math.floor((time+index*.17)*9.)*1.91);
       this.updateUniforms(ribbon.uniforms,time,this.organismWavePhase-ribbon.waveOffset+desyncPhase,
         ribbon.gradientPhase,ribbon.digitPhase,individuality);
+      const body=ribbon.surfaceUniforms;
+      body.uTime.value=time;body.uEnergy.value=this.current.energy;
+      body.uGradientPhase.value=ribbon.gradientPhase;body.uDigitPhase.value=ribbon.digitPhase;
+      body.uAbsorption.value=ribbonAbsorption;
       ribbon.uniforms.uMissingData.value*=localDamage;
       ribbon.uniforms.uGradientDamage.value*=localDamage;
       ribbon.uniforms.uGeometryDamage.value*=localDamage;
@@ -1805,6 +1825,7 @@ export class CoreVisual{
       ribbon.uniforms.uRibbonAbsorptionAnchor.value=(.08+index*.317)%1;
       ribbon.uniforms.uVisibility.value=(1-collapseBlend*(index===1?0:.72))
         *(1-legacyTopologyContainment*.995)*(1-this.cubeMatter.presence);
+      body.uVisibility.value=ribbon.uniforms.uVisibility.value;
       const particles=ribbon.particleUniforms;
       const phaseParticleIntensity=Math.max(
         phaseError.distortion,phaseError.tear,phaseError.collapse,phaseError.eject,

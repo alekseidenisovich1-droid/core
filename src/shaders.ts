@@ -106,7 +106,7 @@ export const fragmentShader=/* glsl */`
   uniform float uWavePhase,uWaveAmplitude,uWaveComplexity,uDigitScale,uDigitDensity;
   uniform float uGradientPhase,uDigitPhase;
   uniform float uErrorDistort,uErrorTear,uErrorCollapse,uErrorEject,uErrorContainment,uErrorJerk,uErrorSeed;
-  uniform float uVisibility,uRgbSplit,uSaturation,uDepthFade,uCorePalette,uPaletteActivity;
+  uniform float uVisibility,uRgbSplit,uSaturation,uDepthFade,uCorePalette,uPaletteActivity,uRibbonInformation,uGhost;
   uniform float uErrorStructure,uMissingData,uGradientDamage;
   varying vec2 vUv;
   varying vec3 vPos,vNormal;
@@ -197,6 +197,9 @@ export const fragmentShader=/* glsl */`
     float flow=surfaceUv.x-uGradientPhase+abs(surfaceUv.y-.5)*.20
       +sin(vPos.z*3.2-uWavePhase*.35)*.055+uOffset;
     vec3 smoothColor=mix(legacyPalette(flow),corePalette(flow,uPaletteActivity),uCorePalette);
+    // Möbius information inherits its palette from the new body material;
+    // the Kernel keeps its existing shader palette and visual role.
+    smoothColor=mix(smoothColor,corePalette(flow,uEnergy),uRibbonInformation);
     vec3 brokenColor=mix(
       legacyPalette(floor(fract(flow)*4.)/4.+step(.5,hash21(errorCell))*.21),
       corePalette(floor(fract(flow)*4.)/4.+step(.5,hash21(errorCell))*.21,uPaletteActivity),
@@ -205,7 +208,14 @@ export const fragmentShader=/* glsl */`
     float glitchBlock=step(.04,sin(surfaceUv.x*50.265482+floor((uTime+uErrorJerk*.08)*11.)*1.73+hash21(errorCell)*2.4));
     float fracture=clamp(outerGlitch*(.38+glitchBlock*.82),0.,1.);
     float localFracture=clamp(fracture+uGradientDamage*localDamage,0.,1.);
+    vec3 ribbonBroken=corePalette(floor(fract(flow)*4.)/4.+step(.5,hash21(errorCell))*.21,uEnergy);
+    brokenColor=mix(brokenColor,ribbonBroken,uRibbonInformation);
     vec3 color=mix(smoothColor,brokenColor,localFracture);
+    vec3 ghostGraphite=vec3(.012,.009,.025),ghostViolet=vec3(.14,.028,.29);
+    vec3 ghostAmber=vec3(.55,.20,.045);
+    vec3 ghostColor=mix(ghostGraphite,ghostViolet,.42+.42*wave);
+    ghostColor=mix(ghostColor,ghostAmber,smoothstep(.78,.98,wave)*smoothstep(.55,1.,uEnergy));
+    color=mix(color,ghostColor,uGhost*.82);
     float corrupt=step(.76,hash21(errorCell+uErrorSeed))*uGradientDamage*localDamage;
     color=mix(color,mix(vec3(.98),vec3(1.,.015,.48),step(.5,hash21(errorCell*1.7))),corrupt);
     color=mix(max(color,vec3(.05,.022,.073)),color,outerGlitch);
@@ -217,7 +227,8 @@ export const fragmentShader=/* glsl */`
     vec3 channelMask=mix(vec3(glyph),vec3(redGlyph,glyph,blueGlyph),split);
     float mask=max(channelMask.r,max(channelMask.g,channelMask.b));
     float unabsorbed=1.-smoothstep(.64,.995,vRibbonAbsorption);
-    float alpha=mask*(.78+fresnel*.19)*waveGlow*glitchVisibility*uVisibility*unabsorbed;
+    float embeddedInfo=mix(1.,.24+.32*wave+.34*smoothstep(.56,.96,uEnergy),uRibbonInformation);
+    float alpha=mask*(.78+fresnel*.19)*waveGlow*glitchVisibility*uVisibility*unabsorbed*embeddedInfo;
     if(alpha<.025)discard;
     vec3 stableRgb=color*(.84+uEnergy*.25+fresnel*.38)*waveGlow;
     vec3 splitRgb=vec3(color.r*channelMask.r,color.g*channelMask.g,color.b*channelMask.b)
@@ -229,6 +240,101 @@ export const fragmentShader=/* glsl */`
     float luminance=dot(finalColor,vec3(.2126,.7152,.0722));
     finalColor=mix(vec3(luminance),finalColor,uSaturation);
     gl_FragColor=vec4(finalColor,min(alpha*mix(1.,.82,uDepthFade),1.));
+  }
+`;
+
+// A dedicated ribbon-body shader keeps material experimentation out of the
+// shared Kernel/glyph topology shader. The mesh uses the existing animated
+// proxy geometry, preserving the Möbius shape, motion, and transition path.
+export const ribbonBodyVertexShader=/* glsl */`
+  varying vec2 vUv;
+  varying vec3 vWorldPosition,vWorldNormal;
+  void main(){
+    vUv=uv;
+    vec4 worldPosition=modelMatrix*vec4(position,1.0);
+    vWorldPosition=worldPosition.xyz;
+    vWorldNormal=normalize(mat3(modelMatrix)*normal);
+    gl_Position=projectionMatrix*viewMatrix*worldPosition;
+  }
+`;
+
+export const ribbonBodyFragmentShader=/* glsl */`
+  uniform float uTime,uEnergy,uOffset,uGradientPhase,uDigitPhase,uVisibility,uAbsorption,uOpacity;
+  varying vec2 vUv;
+  varying vec3 vWorldPosition,vWorldNormal;
+
+  float hash21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+  float valueNoise(vec2 p){
+    vec2 cell=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+    return mix(mix(hash21(cell),hash21(cell+vec2(1.,0.)),f.x),
+      mix(hash21(cell+vec2(0.,1.)),hash21(cell+1.),f.x),f.y);
+  }
+  void main(){
+    vec3 normal=normalize(vWorldNormal);
+    if(!gl_FrontFacing)normal=-normal;
+    vec3 viewDirection=normalize(cameraPosition-vWorldPosition);
+    float fresnel=pow(1.-max(dot(normal,viewDirection),0.),2.55);
+    float grain=valueNoise(vUv*vec2(11.,5.)+vec2(uOffset*19.,uTime*.055));
+    float fine=valueNoise(vUv*vec2(37.,13.)+vec2(uTime*.09,-uOffset*11.));
+    float flow=vUv.x-uGradientPhase*.34+sin(vUv.x*18.85+uDigitPhase*1.7+uOffset*9.)*.055;
+    float cells=valueNoise(vec2(flow*8.5+grain*1.8,vUv.y*4.2+uOffset*7.));
+    float veins=smoothstep(.70,.92,.58*cells+.28*fine+.14*sin(flow*31.4-uTime*.48));
+    float pulse=pow(max(0.,sin(flow*15.7-uTime*(.55+uEnergy*.5)+uOffset*12.)*.5+.5),7.);
+    float energy=(veins*.58+pulse*.75)*mix(.22,1.,smoothstep(.12,.95,uEnergy));
+    vec3 graphite=vec3(.006,.007,.012);
+    vec3 blackViolet=vec3(.031,.013,.060);
+    vec3 violet=vec3(.155,.035,.31);
+    vec3 amberDark=vec3(.17,.052,.012);
+    vec3 amber=vec3(.72,.31,.075);
+    vec3 body=mix(graphite,blackViolet,.34+.42*grain);
+    body=mix(body,violet,smoothstep(.23,.78,cells)*(.26+.46*uEnergy));
+    body=mix(body,amberDark,smoothstep(.48,.82,energy)*.56);
+    body+=amber*pow(energy,4.)*(.3+.7*uEnergy);
+    vec3 keyDirection=normalize(vec3(.42,.67,.61));
+    vec3 fillDirection=normalize(vec3(-.71,.18,.56));
+    vec3 halfKey=normalize(keyDirection+viewDirection);
+    vec3 halfFill=normalize(fillDirection+viewDirection);
+    float roughSpec=pow(max(dot(normal,halfKey),0.),22.)*.42+pow(max(dot(normal,halfFill),0.),38.)*.18;
+    vec3 reflected=reflect(-viewDirection,normal);
+    float environment=.16+.28*max(reflected.y,0.)+.13*max(-reflected.z,0.);
+    body+=vec3(.19,.14,.31)*(roughSpec+fresnel*.17)*environment;
+    body+=mix(vec3(.025,.008,.065),amber*.48,energy)*(fresnel*.30+energy*.18);
+    float unabsorbed=1.-smoothstep(.64,.995,uAbsorption);
+    float alpha=(.62+.15*grain+.12*fresnel)*uOpacity*uVisibility*unabsorbed;
+    gl_FragColor=vec4(body,alpha);
+  }
+`;
+
+// Ghosts preserve their captured Möbius motion through the shared vertex
+// shader, but receive a sparse transient material before their information
+// layer. They therefore read as residual computational matter, not duplicate
+// pink glyph streams.
+export const ribbonGhostBodyFragmentShader=/* glsl */`
+  uniform float uTime,uEnergy,uOffset,uGradientPhase,uDigitPhase,uVisibility;
+  varying vec2 vUv;
+  varying vec3 vPos,vNormal;
+  varying float vWave,vViewDepth,vRibbonAbsorption;
+
+  float hash21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+  float valueNoise(vec2 p){
+    vec2 cell=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+    return mix(mix(hash21(cell),hash21(cell+vec2(1.,0.)),f.x),
+      mix(hash21(cell+vec2(0.,1.)),hash21(cell+1.),f.x),f.y);
+  }
+  void main(){
+    float wave=.5+.5*vWave;
+    float grain=valueNoise(vUv*vec2(9.,3.5)+vec2(uOffset*13.,uTime*.035));
+    float trail=valueNoise(vec2(vUv.x*13.-uGradientPhase*.55+grain,vUv.y*5.+uOffset*8.));
+    float current=pow(max(0.,sin(vUv.x*18.85-uDigitPhase*1.25+uOffset*9.)*.5+.5),8.);
+    float energy=(smoothstep(.56,.90,trail)*.42+current*.8)*smoothstep(.18,.98,uEnergy);
+    vec3 graphite=vec3(.006,.005,.014),violet=vec3(.105,.018,.235),amber=vec3(.58,.19,.035);
+    vec3 color=mix(graphite,violet,.30+.42*trail+.16*wave);
+    color=mix(color,amber,smoothstep(.68,.92,energy)*.48);
+    float fresnel=pow(1.-abs(dot(normalize(vNormal),vec3(0.,0.,1.))),2.2);
+    color+=vec3(.07,.025,.14)*(fresnel*.34+energy*.14);
+    float unabsorbed=1.-smoothstep(.64,.995,vRibbonAbsorption);
+    float alpha=(.13+.13*trail+.12*fresnel+.10*energy)*uVisibility*unabsorbed;
+    gl_FragColor=vec4(color,alpha);
   }
 `;
 
