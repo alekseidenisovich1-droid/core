@@ -19,7 +19,7 @@ Modes CALM, ERROR, CRITICAL, and CRITICAL_2 retain their existing final-state tu
 | 2 → 7 | rotating ribbon convergence, outward point front, stable Terrain | PASS |
 | 7 → 2 | inward point front, small warm two-shell Chaos, ribbon release | PASS; no separate yellow point sphere |
 | 7 → 6 | warm Cube-sized Chaos, seed handoff, stable Cube | PASS |
-| 6 → 7 | Cube seed handoff, Terrain formation, stable Terrain | PASS |
+| 6 → 7 | Cube collapse, seed-to-compact CHAOS, Terrain formation, stable Terrain | PASS |
 | 2 → 7 → 3 → 6 | rapid 200 ms retarget sequence | PASS; native process remained responsive and settled to Cube |
 
 Temporary screenshots were inspected outside the repository. They are not product assets.

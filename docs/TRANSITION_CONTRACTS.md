@@ -13,7 +13,7 @@ Notation: `CORE` means the ribbon + Kernel/Chaos family used by states 1–5; `C
 | CUBE | C | `COLLAPSE_CUBE_TO_SEED` → `SEED_TO_COMPACT` → `RELEASE_COMPACT_TO_CORE` | 6 → 1–5 |
 | C | TERRAIN | `ABSORB_CORE_TO_COMPACT` → `RELEASE_COMPACT_TO_TERRAIN` | 1–5 → 7 |
 | TERRAIN | C | `COLLAPSE_TERRAIN_TO_COMPACT` → `RELEASE_COMPACT_TO_CORE` | 7 → 1–5 |
-| CUBE | TERRAIN | `COLLAPSE_CUBE_TO_SEED` → `RELEASE_COMPACT_TO_TERRAIN` | 6 → 7 |
+| CUBE | TERRAIN | `COLLAPSE_CUBE_TO_SEED` → `SEED_TO_COMPACT` → `RELEASE_COMPACT_TO_TERRAIN` | 6 → 7 |
 | TERRAIN | CUBE | `COLLAPSE_TERRAIN_TO_COMPACT` → `COMPACT_TO_SEED` → `EXPAND_SEED_TO_CUBE` | 7 → 6 |
 
 The runtime exposes these operations through `TransitionController.activeTransition`. Normalized curve functions and named lifecycle thresholds live in `transition-primitives.ts`; Cube and Terrain retain local phase workers for their renderer-specific choreography. Cross-topology coordination uses typed handoffs rather than direct field writes.
@@ -48,7 +48,7 @@ The runtime exposes these operations through `TransitionController.activeTransit
 - Output topology: requested stable CORE state.
 - Owner: one transition primitive plus, only after the handoff boundary, the target director.
 - Canonical progress: `0…1` release progress.
-- Current phases: Cube `reverseKernelHold`/`releaseRibbons`; Terrain `releaseTarget`; final-state tuning can currently begin before ownership completes.
+- Current phases: Cube reaches the typed compact handoff; Terrain `releaseTarget` owns the outward ribbon release for both Cube and Terrain sources. Final-state tuning begins only when this release owns the destination.
 - Allowed entities: compact Chaos, then ribbons/Kernel/Chaos overlap according to one ownership curve; no Cube/Terrain stable renderer after it relinquishes matter.
 - Completion: CORE owns matter and the target state contract is installed; outgoing topology ownership is zero.
 - Interruption: before CORE ownership is established, return to COMPACT; afterward retarget through the appropriate CORE-origin primitive.
@@ -76,7 +76,7 @@ The runtime exposes these operations through `TransitionController.activeTransit
 - Allowed entities: seed and compact Chaos in one morph overlap; Cube cells are already inactive, ribbons/Terrain do not yet own matter.
 - Completion: compact Chaos owns matter, seed is inactive.
 - Interruption: reversible to SEED until compact ownership is established; thereafter queue the next destination.
-- Dependent pairs: 6 → 1–5. The 6 → 7 route may hand the seed directly to Terrain and must choose one documented variant rather than a destination conditional inside generic Cube code.
+- Dependent pairs: 6 → 1–5 and 6 → 7. For 6 → 7, the completed compact CHAOS is handed to Terrain through the typed `cube-compact-ready` boundary; Terrain never consumes the seed directly.
 
 ## `EXPAND_SEED_TO_CUBE`
 
@@ -100,15 +100,15 @@ The runtime exposes these operations through `TransitionController.activeTransit
 - Allowed entities: Cube cells/glyphs/lights and seed; no CORE/Terrain ownership.
 - Completion: seed owns all matter and Cube cells/glyphs are inactive.
 - Interruption: reversibly resume expansion from the captured progress; do not reset quaternion, phase, or progress.
-- Dependent pairs: 6 → 1–5 and 6 → 7.
+- Dependent pairs: 6 → 1–5 and 6 → 7. In the Terrain route its completion is the typed boundary to actual compact CHAOS, not an early destination-state switch.
 
 ## `RELEASE_COMPACT_TO_TERRAIN`
 
-- Input topology: compact CORE Chaos or Cube seed handoff.
+- Input topology: actual compact two-shell Chaos (including the Cube-origin compact handoff).
 - Output topology: stable Terrain point field.
 - Owner: Terrain transition primitive.
 - Canonical progress: one outward formation progress; front shape, point presence, and source consumption are derived outputs.
-- Current phases: Terrain `sourceHold`/`releasePoints`/`propagate`; Cube-origin behavior is coordinated through Cube flags.
+- Current phases: Terrain `sourceHold`/`releasePoints`/`propagate`; Cube-origin behavior begins only after the typed compact-CHAOS handoff, with the same Terrain worker as CORE-origin behavior.
 - Allowed entities: compact source and Terrain points in controlled overlap; no ribbons after source absorption and no complete Cube.
 - Completion: Terrain `idle`, Terrain ownership 1, compact source ownership 0, Terrain camera contract settled.
 - Interruption: before the outward ownership midpoint, collapse back to captured compact source; after it, finish to Terrain safe handoff and process the requested destination.

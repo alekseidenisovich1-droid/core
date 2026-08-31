@@ -29,7 +29,7 @@ flowchart LR
 
   R <-->|Cube forward/reverse FSM| S6
   R <-->|Terrain core-source family| S7
-  S6 <-->|Cube seed plus Terrain family| S7
+  S6 <-->|Cube seed through compact CHAOS plus Terrain family| S7
 ```
 
 All 49 requested origin/destination combinations are nominally accepted by keyboard input, including identity requests. The diagram groups the 20 directed transitions among modes 1–5 because they do not change topology. The 10 directed core/Cube, 10 directed core/Terrain, and 2 directed Cube/Terrain paths are implemented by shared but currently entangled phase logic. Identity requests are stable no-ops except when used to retarget an unfinished transition.

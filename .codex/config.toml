@@ -1,0 +1,29 @@
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
+default_subagent_model = "gpt-5.6-terra"
+default_subagent_reasoning_effort = "medium"
+interrupt_message = true
+
+[agents.scout]
+description = "Fast read-only researcher for bounded codebase exploration, logs, usage tracing, and simple checks."
+config_file = "./agents/scout.toml"
+
+[agents.mechanic]
+description = "Low-cost worker for explicit, local, mechanical edits with low regression risk."
+config_file = "./agents/mechanic.toml"
+
+[agents.implementer]
+description = "Primary implementation worker for normal features, UI behavior, refactors, debugging, and tests."
+config_file = "./agents/implementer.toml"
+
+[agents.specialist]
+description = "High-capability specialist for architecture, ambiguous debugging, systemic refactors, and high-risk changes."
+config_file = "./agents/specialist.toml"
+
+[agents.reviewer]
+description = "Independent reviewer for correctness, regressions, security, and missing verification."
+config_file = "./agents/reviewer.toml"

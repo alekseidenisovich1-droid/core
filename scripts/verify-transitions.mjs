@@ -34,8 +34,10 @@ try{
   controller.request('terrain');
   controller.describe('absorb-core-to-compact','convergeSource',.4,'core','compact','reversible');
   assert.equal(controller.activeTransition?.requestedState,'terrain');
-  controller.publishHandoff({kind:'cube-seed-consumed'});
-  assert.equal(controller.consumeHandoff()?.kind,'cube-seed-consumed');
+  controller.publishHandoff({kind:'cube-compact-ready'});
+  assert.equal(controller.consumeHandoff()?.kind,'cube-compact-ready');
+  controller.publishHandoff({kind:'cube-compact-to-core'});
+  assert.equal(controller.consumeHandoff()?.kind,'cube-compact-to-core');
   assert.equal(controller.consumeHandoff(),null);
 
   const debug={
@@ -59,6 +61,17 @@ try{
   for(const key of ['ribbons','kernel','chaos','seedCube','cubeCells']){
     assert.equal(terrain[key].lifecycle,'inactive',`Terrain must not retain ${key}`);
   }
+  const cubeCompactTerrain=resolveVisualOwnership({
+    ...base,state:'terrain',cubePhase:'seedToKernel',terrainPhase:'sourceHold',
+    terrainEntrySource:'core',terrainConvergence:1,chaosPresence:1,
+  });
+  assert.equal(cubeCompactTerrain.seedCube.lifecycle,'inactive');
+  assert.equal(cubeCompactTerrain.chaos.lifecycle,'transitional');
+  const absorbingTerrain=resolveVisualOwnership({
+    ...base,state:'terrain',terrainPhase:'convergeSource',terrainEntrySource:'core',
+    terrainConvergence:.5,chaosPresence:1,
+  });
+  assert.equal(absorbingTerrain.chaos.lifecycle,'transitional');
   const collapse=resolveVisualOwnership({
     ...base,state:'terrain',terrainPhase:'collapsePoints',terrainPresence:.8,
     terrainConvergence:1,chaosPresence:.4,

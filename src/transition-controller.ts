@@ -15,7 +15,8 @@ export interface ActiveTransition {
 export type TransitionHandoff=
   |{readonly kind:'compact-to-cube';readonly cubeProgress:number}
   |{readonly kind:'compact-to-core';readonly target:VisualState}
-  |{readonly kind:'cube-seed-consumed'};
+  |{readonly kind:'cube-compact-to-core'}
+  |{readonly kind:'cube-compact-ready'};
 
 const topologyFor=(state:VisualState):TransitionTopology=>
   state==='cube'?'cube':state==='terrain'?'terrain':'core';
@@ -79,8 +80,11 @@ export class TransitionController {
     return handoff;
   }
 
-  cubeReverseFloor(seedOnlyEnd:number){
-    return this.requested==='terrain'?seedOnlyEnd:0;
+  cubeReverseFloor(compactReadyProgress:number){
+    // Every Cube exit reaches actual compact Chaos first. Terrain releases it
+    // into points; CORE releases it through the same ribbon primitive used by
+    // Terrain -> CORE, so 6 -> 2 has the 7 -> 2 unfolding grammar.
+    return this.requested==='cube'?0:compactReadyProgress;
   }
 
   cubeProgressCommand(reverseActive:boolean,terrainPhase:string):'forward'|'reverse'|'hold'|'reset'{

@@ -106,7 +106,7 @@ export const fragmentShader=/* glsl */`
   uniform float uWavePhase,uWaveAmplitude,uWaveComplexity,uDigitScale,uDigitDensity;
   uniform float uGradientPhase,uDigitPhase;
   uniform float uErrorDistort,uErrorTear,uErrorCollapse,uErrorEject,uErrorContainment,uErrorJerk,uErrorSeed;
-  uniform float uVisibility,uRgbSplit,uSaturation,uDepthFade;
+  uniform float uVisibility,uRgbSplit,uSaturation,uDepthFade,uCorePalette,uPaletteActivity;
   uniform float uErrorStructure,uMissingData,uGradientDamage;
   varying vec2 vUv;
   varying vec3 vPos,vNormal;
@@ -136,7 +136,7 @@ export const fragmentShader=/* glsl */`
     float b=mix(zeroGlyph(glyphUv),oneGlyph(glyphUv),bitB);
     return mix(a,b,rewrite);
   }
-  vec3 palette(float t){
+  vec3 legacyPalette(float t){
     vec3 black=vec3(.012,.008,.025),darkGray=vec3(.12,.115,.145),gray=vec3(.46,.45,.51);
     vec3 white=vec3(.98,.98,1.),pink=vec3(1.,.08,.49),purple=vec3(.34,.07,1.);
     float q=fract(t)*6.;
@@ -146,6 +146,22 @@ export const fragmentShader=/* glsl */`
     if(q<4.)return mix(white,pink,smoothstep(0.,1.,q-3.));
     if(q<5.)return mix(pink,purple,smoothstep(0.,1.,q-4.));
     return mix(purple,black,smoothstep(0.,1.,q-5.));
+  }
+  vec3 corePalette(float t,float activity){
+    // Darkness deliberately occupies most of the cycle. Amber is a short,
+    // moving information field inside the violet material, never a flat skin.
+    vec3 graphite=vec3(.012,.012,.019);
+    vec3 blackViolet=vec3(.055,.026,.10);
+    vec3 violet=vec3(.24,.08,.45);
+    vec3 darkAmber=vec3(.25,.105,.03);
+    vec3 amber=vec3(.69,.34,.10);
+    float q=fract(t);
+    float violetEnd=mix(.73,.64,activity);
+    float amberStart=mix(.91,.76,activity);
+    if(q<.38)return mix(graphite,blackViolet,smoothstep(0.,.38,q));
+    if(q<violetEnd)return mix(blackViolet,violet,smoothstep(.38,violetEnd,q));
+    if(q<amberStart)return mix(violet,darkAmber,smoothstep(violetEnd,amberStart,q));
+    return mix(darkAmber,amber,smoothstep(amberStart,1.,q));
   }
   void main(){
     vec2 surfaceUv=vUv;
@@ -180,8 +196,12 @@ export const fragmentShader=/* glsl */`
 
     float flow=surfaceUv.x-uGradientPhase+abs(surfaceUv.y-.5)*.20
       +sin(vPos.z*3.2-uWavePhase*.35)*.055+uOffset;
-    vec3 smoothColor=palette(flow);
-    vec3 brokenColor=palette(floor(fract(flow)*4.)/4.+step(.5,hash21(errorCell))*.21);
+    vec3 smoothColor=mix(legacyPalette(flow),corePalette(flow,uPaletteActivity),uCorePalette);
+    vec3 brokenColor=mix(
+      legacyPalette(floor(fract(flow)*4.)/4.+step(.5,hash21(errorCell))*.21),
+      corePalette(floor(fract(flow)*4.)/4.+step(.5,hash21(errorCell))*.21,uPaletteActivity),
+      uCorePalette
+    );
     float glitchBlock=step(.04,sin(surfaceUv.x*50.265482+floor((uTime+uErrorJerk*.08)*11.)*1.73+hash21(errorCell)*2.4));
     float fracture=clamp(outerGlitch*(.38+glitchBlock*.82),0.,1.);
     float localFracture=clamp(fracture+uGradientDamage*localDamage,0.,1.);
@@ -302,7 +322,7 @@ export const containmentVertexShader=/* glsl */`
 `;
 
 export const containmentFragmentShader=/* glsl */`
-  uniform float uTime,uIntensity,uSeed,uLayer,uMatterRemaining,uConversion,uFillProgress,uTerrainWarm;
+  uniform float uTime,uIntensity,uSeed,uLayer,uMatterRemaining,uConversion,uFillProgress,uTerrainWarm,uCorePalette,uPaletteActivity;
   varying vec3 vObjectPos,vNormal;
   varying float vPressure;
   float hash31(vec3 p){p=fract(p*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}
@@ -318,6 +338,16 @@ export const containmentFragmentShader=/* glsl */`
     vec3 color=mix(layerBase,pink,.28+.34*sin(scroll+uTime*2.1));
     color=mix(color,cyan,blocks*(.18+.42*pulse)*(1.-uLayer*.35));
     color+=vec3(1.,.3,.72)*pulse*.42;
+    // CALM/WORK receive a distinct material branch. ERROR/CRITICAL keep the
+    // legacy branch; Terrain warmth remains a separate topology handoff.
+    vec3 graphite=vec3(.018,.017,.027),blackViolet=vec3(.07,.033,.12);
+    vec3 violet=vec3(.28,.09,.48),darkAmber=vec3(.29,.12,.035),amber=vec3(.70,.35,.11);
+    float energyField=.5+.5*sin(scroll*.74+uTime*2.1+vPressure*3.4);
+    float amberField=smoothstep(mix(.94,.77,uPaletteActivity)-uLayer*.06,1.,energyField+pulse*.22);
+    vec3 coreBase=mix(graphite,blackViolet,.36+.28*vPressure);
+    coreBase=mix(coreBase,violet,(.26+.34*(1.-uLayer))*(.45+.55*energyField));
+    coreBase=mix(coreBase,mix(darkAmber,amber,pulse*.55),amberField);
+    color=mix(color,coreBase,uCorePalette);
     // Transition warmth migrates through stable spatial regions instead of
     // replacing the complete Chaos object with a homogeneous yellow sphere.
     float warmRegion=smoothstep(.3,.78,hash31(floor(q*.38)+uSeed*17.)+vPressure*.16);
@@ -333,11 +363,14 @@ export const containmentFragmentShader=/* glsl */`
     float cellNoise=hash31(floor(q*.47)+floor(uTime*.18)+uSeed*11.);
     float retained=smoothstep(1.-uMatterRemaining-.18,1.-uMatterRemaining+.18,cellNoise);
     retained=mix(1.,retained,uConversion);
-    vec3 graphite=vec3(.16,.145,.14),silver=vec3(.58,.52,.43);
-    color=mix(color,mix(graphite,silver,pulse*.32),uConversion*(.35+.4*cellNoise));
+    vec3 conversionGraphite=vec3(.16,.145,.14),silver=vec3(.58,.52,.43);
+    color=mix(color,mix(conversionGraphite,silver,pulse*.32),uConversion*(.35+.4*cellNoise));
     float fresnel=pow(1.-abs(dot(normalize(vNormal),vec3(0.,0.,1.))),2.);
+    // Palette migration is not matter loss. In CORE -> Terrain the same two
+    // CHAOS shells warm up while retaining their opacity; consumption starts
+    // only when Terrain points deliberately take ownership.
     float alpha=uIntensity*(.14+vPressure*.24+blocks*.12+pulse*.18+fresnel*.1)*retained
-      *mix(.12,1.,uFillProgress)*mix(1.,.72,uTerrainWarm);
+      *mix(.12,1.,uFillProgress);
     gl_FragColor=vec4(color*(.78+pulse*.65),alpha);
   }
 `;

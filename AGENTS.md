@@ -16,3 +16,25 @@ Before changing visual, state, or transition code:
 10. If requested behavior conflicts with an invariant, stop and report it before coding.
 
 Before completion: build, run relevant transition regressions, inspect the diff, confirm unrelated stable states did not change, and update architecture docs only when their contract changed.
+
+## Multi-agent orchestration
+
+The primary agent is the orchestrator and final integrator. The user describes the desired outcome; do not ask the user to choose models, roles, branches, or task decomposition when the agent can decide safely.
+
+Before substantive work, classify the request into distinct workstreams and assess the complexity and risk of each one. Delegate automatically when independent bounded workstreams can materially improve speed, context quality, or verification. Do not spawn an agent for a tiny task when coordination would cost more than doing it directly.
+
+Use the cheapest role that can complete a workstream reliably:
+
+- `scout`: Luna/low for read-only file and symbol search, bounded investigation, usage tracing, log analysis, and simple checks.
+- `mechanic`: Luna/low for explicit, local, mechanical, low-risk edits with clear acceptance criteria.
+- `implementer`: Terra/medium for normal feature work, UI behavior, multi-file changes, moderate refactors, debugging, tests, and optimization.
+- `specialist`: Sol/high for architecture, ambiguous or repeated failures, difficult debugging, high-risk changes, system refactors, or mechanisms spanning multiple subsystems.
+- `reviewer`: Terra/high for independent correctness, regression, security, and test review. Use `specialist` for a second review when the change is especially critical.
+
+Escalate only when evidence requires it: Luna -> Terra -> Sol. An agent that finds its assignment more ambiguous, broad, or risky than expected must stop speculative work, report the blocker and evidence, and recommend the next role.
+
+Run read-only exploration, log analysis, tests, and reviews in parallel only when they are independent. Do not let write agents edit overlapping files or shared concepts concurrently. Sequence dependent work and give each mutable concept one authoritative writer.
+
+Give subagents the minimum sufficient context. Prefer no inherited turns or a small bounded turn window when the task can be described independently. Include the exact objective, scope, constraints, expected output, and whether edits are allowed. Require concise summaries with evidence, changed files, commands run, test results, and remaining uncertainty.
+
+Subagent output is evidence, not an automatic approval. The primary agent must inspect the integrated diff, reconcile cross-module assumptions, run the relevant checks from this file and the repository, fix failures, and return one consolidated result to the user.

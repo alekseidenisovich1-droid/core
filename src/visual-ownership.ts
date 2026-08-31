@@ -1,5 +1,5 @@
 import type { VisualState } from './state';
-import { OWNERSHIP_EPSILON,TERRAIN_SOURCE_COMPLETE } from './transition-primitives';
+import { OWNERSHIP_EPSILON } from './transition-primitives';
 
 export type VisualEntityKey='ribbons'|'ribbonShadows'|'ribbonGhosts'|'faultParticles'
   |'kernel'|'chaos'|'chaosDigits'|'seedCube'|'cubeCells'|'cubeGlyphs'|'cubeLight'|'terrain';
@@ -61,13 +61,11 @@ export function resolveVisualOwnership(input:OwnershipInput):VisualOwnershipSnap
     }else{ribbons=true;kernel=false;chaos=true;seed=false;cells=false;cubeLight=false;}
   }else if(input.terrainPhase==='sourceHold'){
     ribbons=false;kernel=false;cells=false;
-    seed=input.terrainEntrySource==='cube';
-    chaos=input.terrainEntrySource!=='cube';
+    seed=false;chaos=true;
     cubeLight=false;
   }else if(input.terrainPhase==='releasePoints'||input.terrainPhase==='propagate'){
     ribbons=false;kernel=false;cells=false;terrain=true;
-    seed=input.terrainEntrySource==='cube'&&input.terrainSourceConsumption<TERRAIN_SOURCE_COMPLETE;
-    chaos=input.terrainEntrySource!=='cube'&&input.chaosPresence>OWNERSHIP_EPSILON;
+    seed=false;chaos=input.chaosPresence>OWNERSHIP_EPSILON;
     cubeLight=false;
   }else if(input.terrainPhase==='idle'){
     ribbons=false;kernel=false;chaos=false;seed=false;cells=false;cubeLight=false;terrain=true;
